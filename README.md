@@ -1,4 +1,4 @@
-# 411-Practicum
-PDX.edu Team 4 Practicum
-Repo name will be updated once finalized on project
-We have 3 ideas prepared, we just want to discuss them with the professor
+# A weather monitor placed near a window
+Portland State University Team 4 Practicum Project
+Mosiah Beal,	Joshua Dworning,	Andy Nguyen,	Joel Utecht,	Casey McGuire
+

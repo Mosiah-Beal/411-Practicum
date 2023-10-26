@@ -88,6 +88,7 @@ void handleTemperaturesensor() {
   unsigned long actualMillis = millis();
   if (actualMillis - lastEvent < EVENT_WAIT_TIME) return; //only check every EVENT_WAIT_TIME milliseconds
 
+  Serial.println("Timer expired");
   temperature = dht.getTemperature();          // get actual temperature in °C
 //  temperature = dht.getTemperature() * 1.8f + 32;  // get actual temperature in °F
   humidity = dht.getHumidity();                // get actual humidity
@@ -97,7 +98,14 @@ void handleTemperaturesensor() {
     return;                                    // try again next time
   } 
 
-  if (temperature == lastTemperature && humidity == lastHumidity) return; // if no values changed do nothing...
+  if (temperature == lastTemperature && humidity == lastHumidity) 
+  {
+    Serial.println("Same temp and humidity as last checkin");
+    lastTemperature = temperature;  // save actual temperature for next compare
+    lastHumidity = humidity;        // save actual humidity for next compare
+    lastEvent = actualMillis;       // save actual time for next compare  
+    return; // if no values changed do nothing...
+  }
 
   SinricProTemperaturesensor &mySensor = SinricPro[TEMP_SENSOR_ID];  // get temperaturesensor device
   bool success = mySensor.sendTemperatureEvent(temperature, humidity); // send event
@@ -146,6 +154,9 @@ void setup() {
 
   setupWiFi();
   setupSinricPro();
+  Serial.println("Temp_Sensor Sketch");
+  Serial.print("Device is "); //Serial.println(onPowerState);
+  
 }
 
 void loop() {

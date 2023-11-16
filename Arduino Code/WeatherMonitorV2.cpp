@@ -58,6 +58,10 @@
  * Other:
  * - https://forums.adafruit.com/viewtopic.php?t=110757 (Graphing on OLED Display initial graph idea since I don't have the part)
  * 
+ * 
+ * Casey needed ArduinoJson, WebSockets(2.4.0 Markus Sattler), Adafruit_I2CDevice, as additional dependencies not included in the libraries
+ * also needed to move weathermonitor.h into IDE
+ * 
  **/
 
 /*************
@@ -88,12 +92,10 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 
-
 /* OLED definitions */
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 // The pins for I2C are defined by the Wire-library. 
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3D ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
@@ -180,6 +182,29 @@ unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
 unsigned long LM393_previous_millis = 0;        // will store last time rain sensor was checked
 const long LM393_sample_interval = 10 * 1000;   // interval at which to sample (in milliseconds)
 
+
+/********
+ * Loop *
+ ********/
+
+void loop() {
+  /* Perform Sinric Pro actions*/
+  SinricPro.handle();
+
+  /* Check for input from the keypad */
+  handleKeypad();
+
+  /* Check for input from the rain sensor */
+  handleRainSensor();
+
+  /* Measure temperature and humidity. */
+  handleTemperaturesensor();
+
+  /* Display temperature and humidity on the display */
+  handleDisplay();
+
+  }
+  
 /*************
  * Functions *
  *************/
@@ -262,6 +287,8 @@ void drawTempGraph() {
 
 }
 
+
+
 /*************
  * Callbacks *
  *************/
@@ -272,6 +299,13 @@ bool onToggleState(const String& deviceId, const String& instance, bool &state) 
   globalToggleStates[instance] = state;
   return true;
 }
+
+/*************
+ * Handlers *
+ *************/
+
+//TODO: Add handlers for other devices, rewrite handlers as needed to accomodate function calls properly
+//     Better follow the flowchart of events/scheduling for standard operation
 
 /* handleTemperatatureSensor()
  * - Checks if Temperaturesensor is turned on
@@ -349,32 +383,58 @@ void handleRainSensor(){
  *          - Timeout/Sleep mode?
  */
 void handleKeypad(){
-    // analyze user inputs
-  /*
-  / switch (get_key()) {
+
+  // analyze user inputs
+  switch (char key = get_key()) {
+    
+    // Navigation keys
     case 'A':
       Serial.println("Scroll up");
-      menu.scrollUp();
+      //menu.scrollUp();
       break;
     case 'B':
       Serial.println("Scroll down");
-      menu.scrollDown();
+      //menu.scrollDown();
       break;
     case 'C':
       Serial.println("Select");
-      menu.select();
+      //menu.select();
       break;
     case 'D':
       Serial.println("Back");
-      menu.back();
+      //menu.back();
       break;
+
+    // Other keys
+    case '*':
+      Serial.println("Star"); //what should this do?
+      break;
+    case '#':
+      Serial.println("Hash"); //what should this do?
+      break;
+      
+    // if a number is pressed, print it to Serial/Send it to the menu
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9':
+      Serial.println(key);
+      //menu.select(key);
+      break;
+
+    // if no key is pressed, do nothing
     default:
       break;
-}
-  */
+  }
 
-  //TODO: Add menu system
-}
+  //TODO: Add menu system, probably using discrete functions instead of member functions [scrollUP() instead of menu.scrollUp()]
+}  
 
 /* handleDisplay()
  * - TODO: - Display current temperature and humidity on the display
@@ -520,24 +580,3 @@ void testKeypad(){
     Serial.println();
   }
 }
-
-/********
- * Loop *
- ********/
-void loop() {
-  /* Perform Sinric Pro actions*/
-  SinricPro.handle();
-
-  /* Check for input from the keypad */
-  handleKeypad();
-
-  /* Check for input from the rain sensor */
-  handleRainSensor();
-
-  /* Measure temperature and humidity. */
-  handleTemperaturesensor();
-
-  /* Display temperature and humidity on the display */
-  handleDisplay();
-
-  }

@@ -46,6 +46,8 @@
  * - https://learn.adafruit.com/adafruit-tca8418-keypad-matrix-and-gpio-expander-breakout/arduino
  * - https://learn.adafruit.com/adafruit-128x64-oled-featherwing/arduino-code
  * - https://circuitdigest.com/microcontroller-projects/esp32-timers-and-timer-interrupts
+ * - https://randomnerdtutorials.com/esp32-i2c-communication-arduino-ide/
+ * - https://forum.arduino.cc/t/convert-code-from-stepper-h-to-accelstepper-h/1072838/8
  * 
  * 
  * Github Libraries:
@@ -53,7 +55,8 @@
  * - https://github.com/adafruit/Adafruit_TCA8418 (Keypad)
  * - https://github.com/adafruit/Adafruit_SH110x (OLED Display)
  * - https://github.com/markruys/arduino-DHT (DHT Sensor)
- * 
+ * - https://github.com/arduino-libraries/Stepper/ (Stepper Motor)
+ * - //https://github.com/adafruit/AccelStepper/ (Stepper Motor)?
  * 
  * Other:
  * - https://forums.adafruit.com/viewtopic.php?t=110757 (Graphing on OLED Display initial graph idea since I don't have the part)
@@ -62,6 +65,16 @@
  * Casey needed ArduinoJson, WebSockets(2.4.0 Markus Sattler), Adafruit_I2CDevice, as additional dependencies not included in the libraries
  * also needed to move weathermonitor.h into IDE
  * 
+ * 
+ * considerations for extra time:
+ * You can set interrupts to trigger on rising or falling edge, or even ONLOW, so I could have the rain sensor wake up
+ * the ESP32 and update rain state.
+ * Keypad with interrupt???
+ * Be able to turn off screen
+ * Set timeout lengths for sensors
+ * Add ESP32 reset funcitonality from keypad input
+ * Add test mode to user options
+ * User options structure?
  **/
 
 /*************
@@ -80,8 +93,12 @@
 #include <SinricProTemperaturesensor.h>
 #include "WeatherMonitor.h"
 
-/* DHT sensor library */
+/* DHT sensor Library */
 #include <DHT.h>
+
+/* Stepper Motor Library */
+//#include <Stepper.h>
+#include <AccelStepper.h>
 
 /* Keypad Matrix Library */
 #include <Adafruit_TCA8418.h>
@@ -122,16 +139,25 @@ char keymap[ROWS][COLS] = {
 #define SSID       "Pixel_7137" //"PSU-IoT" //
 #define PASS       "tc9h7msz9rpug8x" //"9SFkew1Hi2HyRANA" //
 
-/* Pin definitions */
-#define rainAnalog 36
-#define rainDigital 17
+/* Rain Sensor definitions */
+#define rainDigital 17                    // located on pin 17    
 
 /* DHT definitions */
-#define EVENT_WAIT_TIME   60000               // send event every 60 seconds
-#define DHT_PIN           4                   // located on pin 4
+#define EVENT_WAIT_TIME   60000           // send event every 60 seconds
+#define DHT_PIN           4               // located on pin 4
+
+/* Stepper Motor definitions */
+//FIXME: actually define these
+//#define STEPPER_PIN_1 2                   // located on pin 2
+//#define STEPPER_PIN_2 4                   // located on pin 4
+//#define STEPPER_PIN_3 15                  // located on pin 15
+//#define STEPPER_PIN_4 16                  // located on pin 16
 
 /* Serial Communication rate */
 #define BAUD_RATE  115200
+
+
+
 
 /* Objects */
 WeatherMonitor &weatherMonitor = SinricPro[DEVICE_ID];  // make instance of SinricPro device
@@ -139,9 +165,44 @@ DHT dht;                                                // make instance of DHT 
 Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_TCA8418 keypad;
 
-/*************
+/**************
+ * Structures *
+ **************/
+
+struct MonitorState {
+  //Device on/off states
+  bool Display_on;    //I2C connection to display
+  bool Keypad_on;     //I2C connection to keypad
+  bool DHT_on;        //DHT sensor is polled
+  bool RainSensor_on; //Rain sensor is polled
+  bool Stepper_on;    //Stepper motor is controlled
+  
+  //Control states
+  bool Window_open;   //Window is open
+  bool Good_Temp;     //Temperature is within limits
+  bool Good_Humidity; //Humidity is within limits
+  bool Rain;          //Rain sensor is wet
+
+  //User settings
+  bool Use_Target_Temp;     //Use target temperature
+  bool Use_Target_Humidity; //Use target humidity
+  bool Window_Manual;       //Window is manually controlled
+  bool Alarm;               //Alarm is triggered
+  bool Sleep;               //Sleep mode is active
+
+};
+
+//Start with both I2C devices assumed to be missing, DHT and rain sensor allowed to take readings, stepper motor released,
+//window closed, unsafe temperature, unsafe humidity, not currently raining, 
+//Using temperature limits, Using humidity limits, window is controlled manually, alarm off, and sleep off
+static MonitorState Monitor = {
+  false, false, true, true, false,
+  false, false, false, false,
+  false, false, true, false, false};
+
+/**************
  * Prototypes *
- *************/
+ **************/
 
 void handleTemperaturesensor(void);
 void handleRainSensor(void);
@@ -172,15 +233,30 @@ std::map<String, bool> globalToggleStates;
 
 /* DHT device */
 bool deviceIsOn;                              // Temeprature sensor on/off state
+float upperTemperature;                       // target temperature (c)
 float temperature;                            // actual temperature
 float humidity;                               // actual humidity
 float lastTemperature;                        // last known temperature (for compare)
 float lastHumidity;                           // last known humidity (for compare)
 unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
 
+//Temperature and Humidity limits (default values)
+float upperTemp = 27.0; //Upper limit for temperature (c)
+float lowerTemp = 15.0; //Lower limit for temperature (c)
+
+float upperHumidity = 60.0; //Upper limit for humidity (%)
+float lowerHumidity = 40.0; //Lower limit for humidity (%)
+
+//Temperature and Humidity ranges (default values)
+float tempRange = 5.0; //Range of temperature around target temperature that is acceptable (c)
+float targetTemperature = 21.0; //Target temperature (c)
+
+float humidityRange = 10.0; //Range of humidity around target humidity that is acceptable (%)
+float targetHumidity = 50.0; //Target humidity (%)
+
 /* LM393 Rain Sensor */
 unsigned long LM393_previous_millis = 0;        // will store last time rain sensor was checked
-const long LM393_sample_interval = 10 * 1000;   // interval at which to sample (in milliseconds)
+const long LM393_sample_interval = 60 * 1000;   // interval at which to sample (in milliseconds)
 
 
 /********
@@ -192,16 +268,43 @@ void loop() {
   SinricPro.handle();
 
   /* Check for input from the keypad */
-  handleKeypad();
+  if (Monitor.Keypad_on){
+    handleKeypad();
+  }
 
   /* Check for input from the rain sensor */
-  handleRainSensor();
+  if (Monitor.RainSensor_on){
+    handleRainSensor();
+}
 
   /* Measure temperature and humidity. */
-  handleTemperaturesensor();
+  if (Monitor.DHT_on) {
+    handleTemperaturesensor();
 
+}
+  
   /* Display temperature and humidity on the display */
-  handleDisplay();
+  if (Monitor.Display_on){
+    handleDisplay();
+  }
+
+  /* Check if window needs to be opened or closed */
+  if (Monitor.Stepper_on){
+    //handleStepper();
+  }
+
+  /* Check if alarm needs to be triggered */
+  if (Monitor.Alarm){
+    //handleAlarm();
+  }
+
+  /* Check if sleep mode needs to be activated */
+  if (Monitor.Sleep){
+    //handleSleep();
+  }
+
+  /* Update status LEDs */
+  //handleLEDs();
 
   }
   
@@ -288,7 +391,6 @@ void drawTempGraph() {
 }
 
 
-
 /*************
  * Callbacks *
  *************/
@@ -329,10 +431,45 @@ void handleTemperaturesensor() {
     return;                                    // try again next time
   } 
 
-  if (temperature == lastTemperature && humidity == lastHumidity) 
-  {
-    //Serial.println("Same temp and humidity as last checkin");
+  //Check if temperature or humidity exceeds limits
+  if(Monitor.Use_Target_Temp){
+    //Check if temperature is within range of target temperature
+    if(temperature > targetTemperature + tempRange || temperature < targetTemperature - tempRange){
+      Monitor.Good_Temp = false;
+    }
+    else{
+      Monitor.Good_Temp = true;
+    }
   }
+  else{
+    //Check if temperature is within limits
+    if(temperature > upperTemp || temperature < lowerTemp){
+      Monitor.Good_Temp = false;
+    }
+    else{
+      Monitor.Good_Temp = true;
+    }
+  }
+
+  if(Monitor.Use_Target_Humidity){
+    //Check if humidity is within range of target humidity
+    if(humidity > targetHumidity + humidityRange || humidity < targetHumidity - humidityRange){
+      Monitor.Good_Humidity = false;
+    }
+    else{
+      Monitor.Good_Humidity = true;
+    }
+  }
+  else{
+    //Check if humidity is within limits
+    if(humidity > upperHumidity || humidity < lowerHumidity){
+      Monitor.Good_Humidity = false;
+    }
+    else{
+      Monitor.Good_Humidity = true;
+    }
+  }
+  
 
   bool success = weatherMonitor.sendTemperatureEvent(temperature, humidity); // send event
   if (success) {  // if event was sent successfuly, print temperature and humidity to serial
@@ -359,15 +496,18 @@ void handleTemperaturesensor() {
 void handleRainSensor(){
   /* Determine if enough time has passed since last check-in */
   if (check_interval(&LM393_previous_millis, LM393_sample_interval)) {
-    int rainAnalogVal = analogRead(rainAnalog);
     int rainDigitalVal = digitalRead(rainDigital);
-    
-    Serial.print("Analog: ");
-    Serial.print(rainAnalogVal);
-    //Trust the Digital value over the Analog value, for whatever reason the Analog value doesn't match the sensitivity of the digitial level
-    //ADC input is weighted heavily towards 4095
-    Serial.print("\tDigitial: ");
-    Serial.println(rainDigitalVal);
+    //Serial.print("Digitial reading: ");
+    //Serial.println(rainDigitalVal);
+
+    if (rainDigitalVal) {
+      Monitor.Rain = true;
+      //Serial.println("It's raining!");
+    }
+    else {
+      Monitor.Rain = false;
+      //Serial.println("It's not raining!");
+    }
   }
 }
 
@@ -456,6 +596,23 @@ void handleDisplay(){
   
 }
 
+/* handleStepper() */
+void handleStepper(){
+  if (Monitor.Window_Manual){
+    //TODO: Add manual control functionality
+  }
+  else{
+    if (Monitor.Window_open){
+      //stepper.moveTo(OPEN);
+    }
+    else{
+      //stepper.moveTo(CLOSED);
+    }
+  }
+
+
+}
+
 /**********
  * Events *
  *************************************************
@@ -514,8 +671,10 @@ void setupKeypad() {
   // Initialize the TCA8418 with I2C addr 0x34
   if (!keypad.begin(TCA8418_DEFAULT_ADDR, &Wire)){
     Serial.println("Keypad not found!");
-    while (1); //trap program to show error TODO: better user feedback (Visual and/or audible?)
+    Monitor.Keypad_on = false; //TODO: better user feedback (Visual and/or audible?)
+    return;
   }
+  Monitor.Keypad_on = true; //Initialized successfully
   Serial.println("Keypad initialized!");
 
   // configure the size of the keypad matrix.
@@ -530,10 +689,13 @@ void setupDisplay() {
   //https://learn.adafruit.com/adafruit-128x64-oled-featherwing/arduino-code
   // Initialize display with I2C addr 0x3D
   if(!display.begin(SCREEN_ADDRESS, true)) {
-    Serial.println(F("SSD1306 allocation failed"));
-    while(1); //trap program to show error TODO: better user feedback (Visual and/or audible?)
+    Serial.println(F("Display not found"));
+    Monitor.Display_on = false; //TODO: better user feedback (Visual and/or audible?)
+    return;
   }
+  Monitor.Display_on = true; //Initialized successfully
   Serial.println("Display initialized!");
+
   // Show initial display buffer contents on the screen --
   // the library initializes this with an Adafruit splash screen.
   display.display();
@@ -541,14 +703,18 @@ void setupDisplay() {
 
 void setup() {
   Serial.begin(BAUD_RATE);
+  delay(5000); // give me time to bring up serial monitor
+  
   pinMode(rainDigital,INPUT);
-  pinMode(rainAnalog,INPUT);
 
+  setupDisplay();
   setupKeypad();
   setupWiFi();
   setupSinricPro();
-  sendPushNotification("ESP Device is online");
 
+  // Initial setup complete, send push notification to alert user
+  sendPushNotification("Device is online!");
+  
   // Initial readings
   handleRainSensor();   // check rain sensor
   handleTemperaturesensor(); // check temperature sensor
@@ -579,4 +745,40 @@ void testKeypad(){
     Serial.print(keymap[col][row]);
     Serial.println();
   }
+}
+
+void testDisplay(){
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.print("Hello World!");
+  display.display();
+}
+
+void testRainSensor(){
+  int rainDigitalVal = digitalRead(rainDigital);
+  Serial.print("Digitial reading: ");
+  Serial.println(rainDigitalVal);
+}
+
+void testStepper(){
+  /*
+  if (stepper.distanceToGo() == 0)
+    {
+        // Random change to speed, position and acceleration
+        // Make sure we dont get 0 speed or accelerations
+        delay(1000);
+        stepper.moveTo(rand() % 200);
+        stepper.setMaxSpeed((rand() % 200) + 1);
+        stepper.setAcceleration((rand() % 200) + 1);
+    }
+    stepper.run();
+    */
+}
+
+void testAlarm(){
+  //TODO: Add alarm functionality
+}
+
+void testLEDs(){
+  //TODO: Add LED functionality
 }

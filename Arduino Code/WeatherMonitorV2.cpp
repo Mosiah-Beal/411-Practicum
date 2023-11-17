@@ -190,15 +190,111 @@ struct MonitorState {
   bool Alarm;               //Alarm is triggered
   bool Sleep;               //Sleep mode is active
 
+  bool Use_SinricPro;       //Use Sinric Pro ?
+
 };
 
 //Start with both I2C devices assumed to be missing, DHT and rain sensor allowed to take readings, stepper motor released,
 //window closed, unsafe temperature, unsafe humidity, not currently raining, 
 //Using temperature limits, Using humidity limits, window is controlled manually, alarm off, and sleep off
+//use sinric pro
 static MonitorState Monitor = {
   false, false, true, true, false,
   false, false, false, false,
-  false, false, true, false, false};
+  false, false, true, false, false,
+  true};
+
+struct userSettings{
+  // DHT sensor settings
+  float upperTemp; //Upper limit for temperature (c)
+  float lowerTemp; //Lower limit for temperature (c)
+
+  float upperHumidity; //Upper limit for humidity (%)
+  float lowerHumidity; //Lower limit for humidity (%)
+
+  float tempRange; //Range of temperature around target temperature that is acceptable (c)
+  float targetTemperature; //Target temperature (c)
+
+  float humidityRange; //Range of humidity around target humidity that is acceptable (%)
+  float targetHumidity; //Target humidity (%)
+
+  // Polling settings
+  unsigned long DHT_interval;   //Interval at which to poll DHT sensor (ms)
+  unsigned long rain_interval;  //Interval at which to poll rain sensor (ms)
+  
+  unsigned long rain_timeout;   //Timeout for rain sensor (ms)
+  unsigned long monitor_timeout;//Timeout for the monitor (ms) //effectively how long to stay awake after last keypad event
+
+  // Other settings
+  //type window_position; //Current position of window (manually set to open or closed)
+  
+};
+
+/* Start with default values:
+ * upperTemp = 27 (c), lowerTemp = 15 (c), 
+ * upperHumidity = 60%, lowerHumidity = 40%, 
+ * tempRange = 5 (c), targetTemperature = 21 (c), 
+ * humidityRange = 10%, targetHumidity = 50%
+ * DHT_interval = 60 seconds, rain_interval = 60 seconds,
+ * rain_timeout = 60 minutes, monitor_timeout = 15 minutes
+ * window_position = closed
+ */
+static userSettings settings = {
+  27.0, 15.0,
+  60.0, 40.0,
+  5.0, 21.0,
+  10.0, 50.0,
+  60000, 60000, 60 * 60 * 1000, 15 * 60 * 1000};
+
+/**
+ * Main menu
+ * -------------
+ * Start
+ * Settings
+ * Test
+ * Shutdown : disable all sensors, turn off display and LEDs, release motor, 
+ * send final updates to Sinric pro before disconnecting from wifi, deep sleep mode.
+ * 
+ * 
+ *    Start
+ *    -------------
+ *    Window : Open/Close
+ *    Alarm  : On/Off
+ *    Sleep  : Go to sleep
+ *    Restart: Restart ESP32
+ *    Exit   : Exit to main menu
+ * 
+ * 
+ *    Settings
+ *    -------------
+ *    Temperature : Use Target Temperature/Use Temperature Limits -> Set Limits/Set Target Temperature & Range
+ *    Humidity : Use Target Humidity/Use Humidity Limits -> Set Limits/Set Target Humidity & Range
+ *    Measurement Interval : DHT Interval/Rain Interval
+ *    Sleep Mode : How long to wait before turning off screen
+ *    Exit : Exit to main menu
+ * 
+ * 
+ *    Test
+ *   -------------
+ *    Keypad : Display key presses until *#* is pressed
+ *    Display : Display test message
+ *    Rain Sensor : Display rain sensor value
+ *    Stepper Motor : Open/Close window
+ *    Alarm : Trigger alarm
+ *    LEDs : Toggle LEDs
+ *    Exit : Exit to main menu
+ * 
+ */
+struct MenuStruct {
+    std::vector<std::string> choices;
+    int currentSelection;
+    
+    MenuStruct* parent;
+    std::vector<MenuStruct*> children;
+  };
+
+typedef MenuStruct Menu;
+static Menu* current_menu; //current menu position (absolute)
 
 /**************
  * Prototypes *
@@ -208,18 +304,39 @@ void handleTemperaturesensor(void);
 void handleRainSensor(void);
 void handleKeypad(void);
 void handleDisplay(void);
+void handleStepper(void);
+void handleAlarm(void);
+void handleSleep(void);
+void handleLEDs(void);
+
+
+void setParentMenus(Menu* main_menu, Menu start_menu, Menu settings_menu, Menu test_menu);
+void scrollUp(Menu &menu);
+void scrollDown(Menu &menu);
+void selectOption(Menu*& current_menu);
+void back(Menu*& current_menu);
+
 
 bool check_interval(unsigned long* previousMillis, long interval);
 char get_key(void);
 void drawGraph(void);
 void drawTempGraph(void);
 
+
 void setupSinricPro(void);
 void setupWiFi(void);
 void setupKeypad(void);
 void setupDisplay(void);
+void setupMenu(void);
+
 
 void testKeypad(void);
+void testDisplay(void);
+void testRainSensor(void);
+void testStepper(void);
+void testAlarm(void);
+void testLEDs(void);
+
 
 
 /*************
@@ -233,30 +350,15 @@ std::map<String, bool> globalToggleStates;
 
 /* DHT device */
 bool deviceIsOn;                              // Temeprature sensor on/off state
-float upperTemperature;                       // target temperature (c)
 float temperature;                            // actual temperature
 float humidity;                               // actual humidity
 float lastTemperature;                        // last known temperature (for compare)
 float lastHumidity;                           // last known humidity (for compare)
 unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
 
-//Temperature and Humidity limits (default values)
-float upperTemp = 27.0; //Upper limit for temperature (c)
-float lowerTemp = 15.0; //Lower limit for temperature (c)
-
-float upperHumidity = 60.0; //Upper limit for humidity (%)
-float lowerHumidity = 40.0; //Lower limit for humidity (%)
-
-//Temperature and Humidity ranges (default values)
-float tempRange = 5.0; //Range of temperature around target temperature that is acceptable (c)
-float targetTemperature = 21.0; //Target temperature (c)
-
-float humidityRange = 10.0; //Range of humidity around target humidity that is acceptable (%)
-float targetHumidity = 50.0; //Target humidity (%)
-
 /* LM393 Rain Sensor */
-unsigned long LM393_previous_millis = 0;        // will store last time rain sensor was checked
-const long LM393_sample_interval = 60 * 1000;   // interval at which to sample (in milliseconds)
+unsigned long LM393_previous_millis = 0;                      // will store last time rain sensor was checked
+const long LM393_sample_interval = settings.rain_interval;    // interval at which to sample (in milliseconds)
 
 
 /********
@@ -290,7 +392,7 @@ void loop() {
 
   /* Check if window needs to be opened or closed */
   if (Monitor.Stepper_on){
-    //handleStepper();
+    handleStepper();
   }
 
   /* Check if alarm needs to be triggered */
@@ -311,6 +413,36 @@ void loop() {
 /*************
  * Functions *
  *************/
+
+void setParentMenu(Menu* parent_menu, Menu child_menu) {
+  child_menu.parent = parent_menu;
+}
+
+void scrollUp(Menu &menu) {
+  menu.currentSelection--;
+  if (menu.currentSelection < 0) {
+    menu.currentSelection = menu.choices.size() - 1;
+  }
+}
+
+void scrollDown(Menu &menu) {
+  menu.currentSelection++;
+  if (menu.currentSelection >= menu.choices.size()) {
+    menu.currentSelection = 0;
+  }
+}
+
+void selectOption(Menu*& current_menu) {
+  if (current_menu->currentSelection < current_menu->children.size()) {
+    current_menu = current_menu->children[current_menu->currentSelection];
+  }
+}
+
+void back(Menu*& current_menu) {
+    if (current_menu->parent != nullptr) {
+        current_menu = current_menu->parent;
+    }
+}
 
 /* checks if enough time has passed since last occurance, returns true/false*/
 bool check_interval(unsigned long* previousMillis, long interval) {
@@ -434,7 +566,8 @@ void handleTemperaturesensor() {
   //Check if temperature or humidity exceeds limits
   if(Monitor.Use_Target_Temp){
     //Check if temperature is within range of target temperature
-    if(temperature > targetTemperature + tempRange || temperature < targetTemperature - tempRange){
+    if(temperature > settings.targetTemperature + settings.tempRange || 
+    temperature < settings.targetTemperature - settings.tempRange){
       Monitor.Good_Temp = false;
     }
     else{
@@ -443,7 +576,7 @@ void handleTemperaturesensor() {
   }
   else{
     //Check if temperature is within limits
-    if(temperature > upperTemp || temperature < lowerTemp){
+    if(temperature > settings.upperTemp || temperature < settings.lowerTemp){
       Monitor.Good_Temp = false;
     }
     else{
@@ -453,7 +586,8 @@ void handleTemperaturesensor() {
 
   if(Monitor.Use_Target_Humidity){
     //Check if humidity is within range of target humidity
-    if(humidity > targetHumidity + humidityRange || humidity < targetHumidity - humidityRange){
+    if(humidity > settings.targetHumidity + settings.humidityRange || 
+    humidity < settings.targetHumidity - settings.humidityRange){
       Monitor.Good_Humidity = false;
     }
     else{
@@ -462,7 +596,7 @@ void handleTemperaturesensor() {
   }
   else{
     //Check if humidity is within limits
-    if(humidity > upperHumidity || humidity < lowerHumidity){
+    if(humidity > settings.upperHumidity || humidity < settings.lowerHumidity){
       Monitor.Good_Humidity = false;
     }
     else{
@@ -530,19 +664,19 @@ void handleKeypad(){
     // Navigation keys
     case 'A':
       Serial.println("Scroll up");
-      //menu.scrollUp();
+      scrollUp(*current_menu);
       break;
     case 'B':
       Serial.println("Scroll down");
-      //menu.scrollDown();
+      scrollDown(*current_menu);
       break;
     case 'C':
       Serial.println("Select");
-      //menu.select();
+      selectOption(current_menu);
       break;
     case 'D':
       Serial.println("Back");
-      //menu.back();
+      back(current_menu);
       break;
 
     // Other keys
@@ -565,7 +699,7 @@ void handleKeypad(){
     case '8':
     case '9':
       Serial.println(key);
-      //menu.select(key);
+      //add key press to string (they typed a number);
       break;
 
     // if no key is pressed, do nothing
@@ -701,6 +835,66 @@ void setupDisplay() {
   display.display();
 }
 
+void setupMenu() {
+  Menu start_menu = {
+    {
+      "Window",
+      "Alarm",
+      "Sleep",
+      "Restart",
+      "Exit",
+    },
+    0,
+    nullptr,
+    {}
+  };
+
+  Menu settings_menu = {
+    {
+      "Temperature",
+      "Humidity",
+      "Measurement Interval",
+      "Sleep Mode",
+      "Exit",
+    },
+    0,
+    nullptr,
+    {}
+  };
+
+  Menu test_menu = {
+    {
+      "Keypad",
+      "Display",
+      "Rain Sensor",
+      "Stepper Motor",
+      "Alarm",
+      "LEDs",
+      "Exit",
+    },
+    0,
+    nullptr,
+    {}
+  };
+
+  Menu main_menu = {
+    {
+      "Start",
+      "Settings",
+      "Test",
+      "Shutdown",
+    },
+    0,
+    nullptr,
+    {&start_menu, &settings_menu, &test_menu, nullptr}
+  };
+
+  setParentMenu(&start_menu, main_menu);
+  setParentMenu(&settings_menu, main_menu);
+  setParentMenu(&test_menu, main_menu);
+  current_menu = &main_menu;
+  }
+
 void setup() {
   Serial.begin(BAUD_RATE);
   delay(5000); // give me time to bring up serial monitor
@@ -709,6 +903,7 @@ void setup() {
 
   setupDisplay();
   setupKeypad();
+  setupMenu();
   setupWiFi();
   setupSinricPro();
 
@@ -782,3 +977,4 @@ void testAlarm(){
 void testLEDs(){
   //TODO: Add LED functionality
 }
+

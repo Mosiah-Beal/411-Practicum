@@ -87,6 +87,8 @@
  * 
  * - Make sure the menu system works (test sequence of inputs)
  * 
+ * DHT color wires
+ * (Green: GND, Yellow: Data, Blue: VCC)
  **/
 
 /*************
@@ -145,7 +147,7 @@ char keymap[ROWS][COLS] = {
 /* Sinric Pro definitions */
 #define APP_KEY    "7a7caefc-db9f-4372-b86d-41393f1f74cd"
 #define APP_SECRET "8fede556-9e2f-4613-b78b-aeebc5cd2dbb-84d4844f-28c7-4350-9a96-d69387f56bbb"
-#define DEVICE_ID  "653846228332c2648adaa2a7"
+#define DEVICE_ID  "65386353b1138c00c95e2e88"
 
 /* Wifi Credentials */
 #define SSID       "Pixel_7137" //"PSU-IoT" //
@@ -312,7 +314,12 @@ struct MenuStruct {
   };
 
 typedef MenuStruct Menu;
-static Menu* current_menu; //current menu position (absolute)
+Menu* current_menu = new Menu; //current menu position (used for navigation)
+Menu* main_menu = new Menu; //main menu (absolute)
+Menu* start_menu = new Menu; //start menu (relative to main menu)
+Menu* settings_menu = new Menu; //settings menu (relative to main menu)
+Menu* test_menu = new Menu; //test menu (relative to main menu)
+
 
 /**************
  * Prototypes *
@@ -380,6 +387,11 @@ void testStepper(void);
 void testAlarm(void);
 void testLEDs(void);
 
+void simulateWindow(void);
+void simulateTemperature(void);
+void simulateRain(void);
+void printMenuStatus(Menu* menu);
+
 
 
 /*************
@@ -399,10 +411,20 @@ float lastTemperature;                        // last known temperature (for com
 float lastHumidity;                           // last known humidity (for compare)
 unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
 
+
+/* DHT */
+unsigned long DHT_previous_millis = 0;                      // will store last time DHT was checked
+const long DHT_sample_interval = settings.DHT_interval;    // interval at which to sample (in milliseconds)
+
+
 /* LM393 Rain Sensor */
 unsigned long LM393_previous_millis = 0;                      // will store last time rain sensor was checked
 const long LM393_sample_interval = settings.rain_interval;    // interval at which to sample (in milliseconds)
 
+
+/* Simulated Window */
+unsigned long menu_previous_millis = 0;                           // will store last time window was opened/closed
+const long menu_refresh_interval = 5 * 1000;                             // interval at which to open/close window (in milliseconds)
 
 /********
  * Loop *
@@ -417,14 +439,34 @@ void loop() {
   {
     //testKeypad();
     //testDisplay();
-    testMenu();
-    testRainSensor();
-    testTemperatureSensor();
     //testStepper();
     //testAlarm();
     //testLEDs();
 
-    delay(2*1000);  // wait 2 seconds
+    /*
+    // Print address of current_menu
+    Serial.print("Address of current_menu: ");
+    Serial.println((uintptr_t)current_menu, HEX);
+
+    Serial.println("Current Menu");
+    //printMenuStatus(current_menu);
+    */
+
+    if(check_interval(&menu_previous_millis, menu_refresh_interval)) {
+      testMenu();
+    }
+    
+
+    /*
+    if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
+      testRainSensor();
+    }
+
+    if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
+      testTemperatureSensor();
+    }
+    */
+
   }
   else
   {
@@ -514,17 +556,25 @@ void scrollDown(Menu &menu) {
  * 
  */
 void selectOption(Menu*& current_menu) {
-  // Check if the current selection is a function or a submenu
-  if (current_menu->currentSelection < current_menu->functions.size()
-   && current_menu->functions[current_menu->currentSelection] != nullptr) {
-    // There is a function associated with the current selection
-    current_menu->functions[current_menu->currentSelection]();
-    back();
+
+  // Check if the current menu exists
+  if (current_menu == NULL) {
+    Serial.println("No menu selected");
   } 
-  else if (current_menu->currentSelection < current_menu->children.size() 
-  && current_menu->children[current_menu->currentSelection] != nullptr) {
-    // Change the current menu to the submenu associated with the current selection
-    current_menu = current_menu->children[current_menu->currentSelection];
+  else {
+
+    // Check if the current selection is a function or a submenu
+    if (current_menu->currentSelection < current_menu->functions.size()
+    && current_menu->functions[current_menu->currentSelection] != nullptr) {
+      // There is a function associated with the current selection
+      current_menu->functions[current_menu->currentSelection]();
+      back();
+    } 
+    else if (current_menu->currentSelection < current_menu->children.size() 
+    && current_menu->children[current_menu->currentSelection] != nullptr) {
+      // Change the current menu to the submenu associated with the current selection
+      current_menu = current_menu->children[current_menu->currentSelection];
+    }
   }
 }
 
@@ -591,6 +641,8 @@ void changeTempSettings(){
       break;
     
     case 3:
+    // Go back to the settings menu
+
       break;
     
     default:
@@ -876,6 +928,7 @@ void drawTempGraph() {
 
 }
 
+
 // ToggleController
 bool onToggleState(const String& deviceId, const String& instance, bool &state) {
   Serial.printf("[Device: %s]: State for \"%s\" set to %s\r\n", deviceId.c_str(), instance.c_str(), state ? "on" : "off");
@@ -1113,6 +1166,7 @@ void handleLEDs(){
   //TODO: Add LED functionality
 }
 
+
 /**********
  * Events *
  *************************************************
@@ -1147,6 +1201,9 @@ void setupSinricPro() {
   SinricPro.onConnected([]{ Serial.printf("[SinricPro]: Connected\r\n"); });
   SinricPro.onDisconnected([]{ Serial.printf("[SinricPro]: Disconnected\r\n"); });
   SinricPro.begin(APP_KEY, APP_SECRET);
+
+  // Restore state of toggle device "toggleInstance1" when device is connected
+  SinricPro.restoreDeviceStates(true);
 };
 
 void setupWiFi() {
@@ -1247,121 +1304,82 @@ void setupDisplay() {
  * 
  */
 void setupMenu() {
-  Menu start_menu = {
-    // Name
+  Menu* start_menu = new Menu{
     "Start",
-    // Choices
-    {
-      "Window",
-      "Alarm",
-      "Sleep",
-      "Restart",
-      "Exit",
-    },
-    // Current selection
+    {"Window", "Alarm", "Sleep", "Restart", "Exit"},
     0,
-    // Parent menu
     nullptr,
-    // Children menus
     {},
-    // Functions
     {}
   };
 
-  Menu settings_menu = {
-    // Name
+  Menu* settings_menu = new Menu{
     "Settings",
-    // Choices
-    {
-      "Temperature",
-      "Humidity",
-      "Measurement Interval",
-      "Sleep Mode",
-      "Exit",
-    },
-    // Current selection
+    {"Temperature", "Humidity", "Measurement Interval", "Sleep Mode", "Exit"},
     0,
-    // Parent menu
     nullptr,
-    // Children menus
     {},
-    // Functions
     {}
   };
 
-  Menu test_menu = {
-    // Name
+  Menu* test_menu = new Menu{
     "Test",
-    // Choices
-    {
-      "Keypad",
-      "Display",
-      "Rain Sensor",
-      "Stepper Motor",
-      "Alarm",
-      "LEDs",
-      "Exit",
-    },
-    // Current selection
+    {"Keypad", "Display", "Rain Sensor", "Stepper Motor", "Alarm", "LEDs", "Exit"},
     0,
-    // Parent menu
     nullptr,
-    // Children menus
     {},
-    // Functions
     {}
   };
 
-  Menu main_menu = {
-    // Name
+  Menu* main_menu = new Menu{
     "Main Menu",
-    // Choices
-    {
-      "Start",
-      "Settings",
-      "Test",
-      "Shutdown",
-    },
-    // Current selection
+    {"Start", "Settings", "Test", "Shutdown"},
     0,
-    // Parent menu
     nullptr,
-    // Children menus
-    {&start_menu, &settings_menu, &test_menu, nullptr},
-    // Functions
+    {start_menu, settings_menu, test_menu, nullptr},
     {nullptr, nullptr, nullptr, /*TODO: Add shutdown function */}
   };
 
-  /* Connect menus */ 
+  // Connect menus
+  setParentMenu(start_menu, *main_menu);
+  //* Connect menus */ 
   // start menu
-  setParentMenu(&start_menu, main_menu);
-  addFunction(&start_menu, handleStepper);
-  addFunction(&start_menu, handleAlarm);
-  addFunction(&start_menu, handleSleep);
-  addFunction(&start_menu, nullptr);  //TODO: Add restart function
-  addFunction(&start_menu, back);
+  addFunction(start_menu, handleStepper);
+  addFunction(start_menu, handleAlarm);
+  addFunction(start_menu, handleSleep);
+  addFunction(start_menu, nullptr);  //TODO: Add restart function
+  addFunction(start_menu, back);
 
   // settings menu
-  setParentMenu(&settings_menu, main_menu);
-  addFunction(&settings_menu, changeTempSettings);
-  addFunction(&settings_menu, changeHumiditySettings);
-  addFunction(&settings_menu, changeMeasurementInterval);
-  addFunction(&settings_menu, changeSleepMode);
-  addFunction(&settings_menu, back);
+  setParentMenu(settings_menu, *main_menu);
+  addFunction(settings_menu, changeTempSettings);
+  addFunction(settings_menu, changeHumiditySettings);
+  addFunction(settings_menu, changeMeasurementInterval);
+  addFunction(settings_menu, changeSleepMode);
+  addFunction(settings_menu, back);
 
   // test menu
-  setParentMenu(&test_menu, main_menu);
-  addFunction(&test_menu, testKeypad);
-  addFunction(&test_menu, testDisplay);
-  addFunction(&test_menu, testRainSensor);
-  addFunction(&test_menu, testStepper);
-  addFunction(&test_menu, testAlarm);
-  addFunction(&test_menu, testLEDs);
-  addFunction(&test_menu, back);
+  setParentMenu(test_menu, *main_menu);
+  addFunction(test_menu, testKeypad);
+  addFunction(test_menu, testDisplay);
+  addFunction(test_menu, testRainSensor);
+  addFunction(test_menu, testStepper);
+  addFunction(test_menu, testAlarm);
+  addFunction(test_menu, testLEDs);
+  addFunction(test_menu, back);
+
 
   // Set current menu to main menu
-  current_menu = &main_menu;
-  }
+  current_menu = main_menu;
+
+  // Print address of current_menu
+  Serial.print("Address of current_menu: ");
+  Serial.println((uintptr_t)current_menu, HEX);
+
+  // Print address of main_menu
+  Serial.print("Address of main_menu: ");
+  Serial.println((uintptr_t)main_menu, HEX);
+}
 
 void setup() {
   Serial.begin(BAUD_RATE);
@@ -1386,46 +1404,6 @@ void setup() {
 /********* 
  * Test Functions *
  *********/
-
-void testMenu(){
-  // Use Serial Monitor to test menu system
-  
-  
-  // Check if there's available data on the serial port
-  if (Serial.available() > 0) {
-    // Read the input
-    char input = Serial.read();
-
-    // Perform the corresponding action
-    switch (input) {
-      case 'a':
-        scrollUp(*current_menu);
-        break;
-      case 'b':
-        scrollDown(*current_menu);
-        break;
-      case 'c':
-        selectOption(current_menu);
-        break;
-      case 'd':
-        back();
-        break;
-    }
-  
-    // Print the current menu
-    Serial.println(current_menu->title);
-    for (int i = 0; i < current_menu->choices.size(); i++) {
-      Serial.print(i == current_menu->currentSelection ? ">" : " ");
-      Serial.println(current_menu->choices[i]);
-    }
-
-    // Print acceptable inputs
-    Serial.println("a: up, b: down, c: select, d: back");
-  }
-
-
-
-}
 
 void testKeypad(){  
   if (keypad.available() > 0) {
@@ -1464,6 +1442,9 @@ void testRainSensor(){
 }
 
 void testTemperatureSensor(){
+  // Check the status of the sensor
+  Serial.println(dht.getStatusString());
+  
   temperature = dht.getTemperature();          // get actual temperature in °C
   humidity = dht.getHumidity();                // get actual humidity
   
@@ -1499,3 +1480,130 @@ void testLEDs(){
   //TODO: Add LED functionality
 }
 
+void testMenu(){
+  // Use Serial Monitor to test menu system
+  printMenuStatus(current_menu);
+
+  
+  // Check if there's available data on the serial port
+  if (Serial.available() > 0) {
+    // Read the input
+    char input = Serial.read();
+    
+    // Perform the corresponding action
+    switch (input) {
+      case 'a':
+        scrollUp(*current_menu);
+        break;
+      case 'b':
+        scrollDown(*current_menu);
+        break;
+      case 'c':
+        selectOption(current_menu);
+        break;
+      case 'd':
+        back();
+        break;
+      default:
+        break;
+    }
+    // Print the current menu after the action
+    printMenuStatus(current_menu);
+    
+    //simulateWindow();
+  }
+
+}
+
+
+void simulateRain(){
+  //TODO: Add rain simulation functionality
+}
+
+void simulateTemperature(){
+  //simulate random temperature reading between 10C and 30C
+  temperature = rand() % 20 + 10;
+
+  //simulate random humidity reading between 30% and 70%
+  humidity = rand() % 40 + 30;
+  
+}
+
+void simulateWindow(){
+  // show the current state of pointers
+    Serial.print("current_menu: ");
+    Serial.println(current_menu->title);
+    Serial.print("current_menu->parent: ");
+    Serial.println(current_menu->parent == nullptr ? "nullptr" : current_menu->parent->title);
+    Serial.print("current_menu->children: ");
+    for (int i = 0; i < current_menu->children.size(); i++) {
+      Serial.print(current_menu->children[i] == nullptr ? "nullptr" : current_menu->children[i]->title);
+      Serial.print(" ");
+    }
+    Serial.println();
+    Serial.print("current_menu->functions: ");
+    for (int i = 0; i < current_menu->functions.size(); i++) {
+      Serial.print(current_menu->functions[i] == nullptr ? "nullptr" : "function");
+      Serial.print(" ");
+    }
+    Serial.println();
+
+    // Tell the user what they can do
+    Serial.println("a: up, b: down, c: select, d: back");
+
+
+    // Print the current menu
+    Serial.println(current_menu->title);
+    for (int i = 0; i < current_menu->choices.size(); i++) {
+      Serial.print(i == current_menu->currentSelection ? ">" : " ");
+      Serial.println(current_menu->choices[i]);
+    }
+}
+
+
+/**
+ * printMenuStatus() - Prints the current menu status to the serial monitor
+ * @param menu - The current menu layer
+ * 
+ * This function prints the current menu status to the serial monitor.
+ * It prints the menu title, the current selection, and the choices.
+ * It also prints a ">" next to the current selection.
+ * 
+ * The menu passed in has the format:
+ * 
+ * Menu {
+ * String title,
+ * vector<String> choices,
+ * int currentSelection,
+ * Menu* parent,
+ * vector<Menu*> children,
+ * vector<MenuFunction> functions
+ * }
+ * 
+ * The menu is printed in the following format:
+ * 
+ * Menu Title: <title>
+ * Current Selection: <currentSelection>
+ * Choices:
+ * <choice 1>
+ * <choice 2>
+ * ...
+ * <choice n>
+ * 
+ * If the menu passed in is null, then it prints "No menu selected"
+ * 
+ * 
+ */
+void printMenuStatus(Menu* menu) {
+  if (menu != NULL) {
+    Serial.println("Menu Title: " + menu->title);
+    Serial.println("Current Selection: " + String(menu->currentSelection));
+    Serial.println("Choices:");
+    for (int i = 0; i < menu->choices.size(); i++) {
+      Serial.print(i == menu->currentSelection ? ">" : " ");
+      Serial.println(menu->choices[i]);
+    }
+  } else {
+    Serial.println("No menu selected");
+  }
+}

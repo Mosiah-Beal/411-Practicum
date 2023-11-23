@@ -451,7 +451,7 @@ void loop() {
     Serial.println("Current Menu");
     //printMenuStatus(current_menu);
     */
-   
+
     if(check_interval(&menu_previous_millis, menu_refresh_interval)) {
       testMenu();
     }
@@ -558,7 +558,7 @@ void scrollDown(Menu &menu) {
 void selectOption(Menu*& current_menu) {
 
   // Check if the current menu exists
-  if (current_menu = NULL) {
+  if (current_menu == NULL) {
     Serial.println("No menu selected");
   } 
   else {

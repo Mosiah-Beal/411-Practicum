@@ -1,3 +1,34 @@
+// Info: Practicum Project for ECE 411
+/**
+ * @file WeatherMonitorV2.cpp
+ * @author Mosiah Beal (mosiah@pdx.edu)
+ * @version 0.5
+ * @date 2023-11-30
+ *
+ * @brief Practicum Project for ECE 411
+ *        Window Weather Monitor: Monitors the weather outside a window and control the window based on the weather.
+ *        It utilizes a ESP32 Huzzah Feather board, a DHTxx temperature and humidity sensor, a LM393 rain sensor, a stepper motor,
+ *        and a 4x4 keypad. It also has a 128x64 OLED display for debugging and displaying the current temperature and humidity.
+ *        It uses two breakout boards, one for the stepper motor and one for the keypad. The OLED display and the keypad are connected over I2C. 
+ * 
+ *        The program stores the current state of the monitor in a struct called MonitorState. It also stores the user settings
+ *        in a struct called userSettings. The program updates the monitor state based on the user settings and the sensor readings.
+ *        It also sends the sensor readings to the Sinric Pro server.
+ *        
+ *        The program uses a menu system to allow the user to change the settings and test the components.
+ *        The menu system is implemented using a tree of structs called MenuStructs. 
+ *        Each menu has a title, a list of choices, a current selection, a pointer to the parent menu, a list of pointers to the child menus, 
+ *        and a list of pointers to functions. The functions are called when the user selects the option associated with the function. 
+ *        
+ *        The menu system is implemented using a pointer to the current menu. The current menu pointer is updated when the user selects an option
+ *        associated with a submenu. The current menu pointer will be updated to the parent menu when the user selects the exit option.
+ * 
+ *        The OLED display is used to display the current menu and the current selection. It is also used to display the current temperature and humidity.
+ *        
+ *        The keypad is used to navigate the menu system and select options. It is also used to set the user settings and test the components.
+ * 
+ */
+
 /**
  * Window Weather Monitor
  * 
@@ -153,12 +184,9 @@ char keymap[ROWS][COLS] = {
 #define SSID       "Pixel_7137" //"PSU-IoT" //
 #define PASS       "tc9h7msz9rpug8x" //"9SFkew1Hi2HyRANA" //
 
-/* Rain Sensor definitions */
-#define rainDigital 17                    // located on pin 17    
-
 /* DHT definitions */
 #define EVENT_WAIT_TIME   60000           // send event every 60 seconds
-#define DHT_PIN           4               // located on pin 4
+
 
 /* Stepper Motor definitions */
 //FIXME: actually define these
@@ -171,9 +199,41 @@ char keymap[ROWS][COLS] = {
 #define BAUD_RATE  115200
 
 
+/*************
+ * Pin Setup *                            //(silkscreen on PCB)
+ * ***********/
+
+/* I2C Pins (if you want to relocate the bus) */
+#define I2C_SCL 22                        // located on (SCL)
+#define I2C_SDA 23                        // located on (SDA)
+
+/* Rain Sensor */
+#define rainDigital 13                    //located on (13)
+
+/* DHT */
+#define DHT_PIN 15                        // located on (15)
+
+/* Stepper Motor */
+#define STEPPER_PIN_1 26                  // located on (A0)
+#define STEPPER_PIN_2 25                  // located on (A1)
+#define STEPPER_PIN_3 34                  // located on (A2)
+#define STEPPER_PIN_4 39                  // located on (A3)
+
+/* LEDS */
+#define POWER_LED 36                      // located on (A4)
+#define WINDOW_LED 4                      // located on (A5)
+#define TEMP_LED_R 5                      // located on (SCK)
+#define TEMP_LED_G 18                     // located on (MOSI)
+#define TEMP_LED_B 19                     // located on (MISO)
+
+/* Alarm Buzzer */
+#define ALARM_PIN 21                   // located on (21)
 
 
-/* Objects */
+/*************
+ * Instances *
+ *************/
+
 WeatherMonitor &weatherMonitor = SinricPro[DEVICE_ID];  // make instance of SinricPro device
 DHT dht;                                                // make instance of DHT sensor
 Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -300,7 +360,7 @@ static userSettings settings = {
  * 
  */
 
-// Step 1: Define a function pointer type
+// Defining a function pointer type
 typedef void (*MenuFunction)();
 
 struct MenuStruct {
@@ -325,7 +385,10 @@ Menu* test_menu = new Menu; //test menu (relative to main menu)
  * Prototypes *
  **************/
 
-// Callbacks
+// ToggleController
+bool onToggleState(const String& deviceId, const String& instance, bool &state);
+
+// Management functions
 void handleTemperaturesensor(void);
 void handleRainSensor(void);
 void handleKeypad(void);
@@ -347,6 +410,7 @@ void scrollUp(Menu &menu);
 void scrollDown(Menu &menu);
 void selectOption(Menu*& current_menu);
 void back();
+void printMenuStatus(Menu* menu);
 
 
 // Setting menu functions
@@ -377,7 +441,7 @@ void setupAlarm(void);
 void setupLEDs(void);
 
 
-// Test functions
+// Debug functions
 void testMenu(void);
 void testKeypad(void);
 void testDisplay(void);
@@ -387,10 +451,12 @@ void testStepper(void);
 void testAlarm(void);
 void testLEDs(void);
 
-void simulateWindow(void);
+// Simulated input functions
 void simulateTemperature(void);
 void simulateRain(void);
-void printMenuStatus(Menu* menu);
+
+
+
 
 
 
@@ -400,36 +466,47 @@ void printMenuStatus(Menu* menu);
  * Global variables to store the device states *
  ***********************************************/
 
+/* Debug Flags */
+bool Debug = true; // Set to true to enable debug mode
+bool simulatedRain = false; // Set to true to simulate rain
+bool simulatedTemperature = false; // Set to true to simulate temperature
+
+
+
 // ToggleController
 std::map<String, bool> globalToggleStates;
 
 /* DHT device */
 bool deviceIsOn;                              // Temeprature sensor on/off state
-float temperature;                            // actual temperature
-float humidity;                               // actual humidity
 float lastTemperature;                        // last known temperature (for compare)
 float lastHumidity;                           // last known humidity (for compare)
 unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
 
+float temperature;                            // current temperature
+float humidity;                               // current humidity
+
+
+
+/*************
+ *   Timers  *
+ * ***********/
 
 /* DHT */
 unsigned long DHT_previous_millis = 0;                      // will store last time DHT was checked
 const long DHT_sample_interval = settings.DHT_interval;    // interval at which to sample (in milliseconds)
 
-
 /* LM393 Rain Sensor */
 unsigned long LM393_previous_millis = 0;                      // will store last time rain sensor was checked
 const long LM393_sample_interval = settings.rain_interval;    // interval at which to sample (in milliseconds)
 
+/* Simulated Menu */
+unsigned long menu_previous_millis = 0;                           // will store last time menu was opened/closed
+const long menu_refresh_interval = 5 * 1000;                      // interval at which to open/close menu (in milliseconds)
 
-/* Simulated Window */
-unsigned long menu_previous_millis = 0;                           // will store last time window was opened/closed
-const long menu_refresh_interval = 5 * 1000;                             // interval at which to open/close window (in milliseconds)
 
-/********
- * Loop *
- ********/
-bool Debug = true;
+/*************
+ *   Loop    *
+ *************/
 void loop() {
   /* Perform Sinric Pro actions*/
   SinricPro.handle();
@@ -459,11 +536,11 @@ void loop() {
 
     /*
     if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
-      testRainSensor();
+      (simulatedRain) ? simulateRain() : testRainSensor();
     }
 
     if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
-      testTemperatureSensor();
+      (simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
     }
     */
 
@@ -928,7 +1005,6 @@ void drawTempGraph() {
 
 }
 
-
 // ToggleController
 bool onToggleState(const String& deviceId, const String& instance, bool &state) {
   Serial.printf("[Device: %s]: State for \"%s\" set to %s\r\n", deviceId.c_str(), instance.c_str(), state ? "on" : "off");
@@ -936,8 +1012,10 @@ bool onToggleState(const String& deviceId, const String& instance, bool &state) 
   return true;
 }
 
+
+
 /*************
- * Handlers *
+ * Handlers  *
  *************/
 
 //TODO: Add handlers for other devices, rewrite handlers as needed to accomodate function calls properly
@@ -946,9 +1024,8 @@ bool onToggleState(const String& deviceId, const String& instance, bool &state) 
 /* handleTemperatatureSensor()
  * - Checks if Temperaturesensor is turned on
  * - Checks if time since last event > EVENT_WAIT_TIME to prevent sending too many events
- * - Get actual temperature and humidity and check if these values are valid
+ * - Get actual temperature and humidity and check if these values are within limits
  * - Compares actual temperature and humidity to last known temperature and humidity
- * - Send event to SinricPro Server if temperature or humidity changed
  */
 void handleTemperaturesensor() {
   if (deviceIsOn == false) return; // device is off...do nothing
@@ -1035,6 +1112,9 @@ void handleRainSensor(){
     int rainDigitalVal = digitalRead(rainDigital);
     Serial.print("Digitial reading: ");
     Serial.println(rainDigitalVal);
+
+    // Single line flag assignment (if rainDigitalVal is 0, then Monitor.Rain = true, else Monitor.Rain = false)
+    //Monitor.Rain = !rainDigitalVal;
 
     //0 is short - raining
     //1 is open - not raining
@@ -1385,8 +1465,31 @@ void setup() {
   Serial.begin(BAUD_RATE);
   delay(5000); // give me time to bring up serial monitor
   
-  pinMode(rainDigital,INPUT);
+  // Rain sensor input
+  pinMode(rainDigital, INPUT);
 
+  // Status LEDs
+  pinMode(POWER_LED, OUTPUT);
+  pinMode(WINDOW_LED, OUTPUT);
+  
+  // RGB LED
+  pinMode(TEMP_LED_R, OUTPUT);
+  pinMode(TEMP_LED_G, OUTPUT);
+  pinMode(TEMP_LED_B, OUTPUT);
+
+  // Stepper motor
+  //stepper.setMaxSpeed(1000);
+  //stepper.setAcceleration(1000);
+  //pinMode(STEPPER_MOTOR_PIN_1, OUTPUT);
+  //pinMode(STEPPER_MOTOR_PIN_2, OUTPUT);
+  //pinMode(STEPPER_MOTOR_PIN_3, OUTPUT);
+  //pinMode(STEPPER_MOTOR_PIN_4, OUTPUT);
+
+  // Alarm
+  pinMode(ALARM_PIN, OUTPUT);
+
+
+  // Initializations
   setupDisplay();
   setupKeypad();
   setupMenu();
@@ -1436,12 +1539,14 @@ void testDisplay(){
 }
 
 void testRainSensor(){
+  
   int rainDigitalVal = digitalRead(rainDigital);
   Serial.print("Digitial reading: ");
   Serial.println(rainDigitalVal);
 }
 
 void testTemperatureSensor(){
+  
   // Check the status of the sensor
   Serial.println(dht.getStatusString());
   
@@ -1474,10 +1579,135 @@ void testStepper(){
 
 void testAlarm(){
   //TODO: Add alarm functionality
+  Serial.println("Triggering alarm for 5 seconds");
+  digitalWrite(ALARM_PIN, HIGH);
+  delay(5000);
+  digitalWrite(ALARM_PIN, LOW);
+  Serial.println("Alarm off");
+  
 }
 
+/**
+ * @brief Runs a test of the LEDs
+ * 
+ * Turns on the Power LED for 3 seconds before turning it off.
+ * Turns on the Status LED for 3 seconds before turning it off.
+ * 
+ * Sets Temperature RGB LED to white for 3 seconds.
+ * Then turns LED red, blue, green for 3 seconds each.
+ * Then cycles through the color spectrum for 5 seconds.
+ * Then turns off the Temperature LED.
+ * 
+ */
 void testLEDs(){
   //TODO: Add LED functionality
+  Serial.println("Testing LEDs");
+
+  Serial.println("Power LED on");
+  digitalWrite(POWER_LED, HIGH);
+  delay(3000);
+  Serial.println("Power LED off");
+  digitalWrite(POWER_LED, LOW);
+
+
+  Serial.println("Status LED on");
+  digitalWrite(WINDOW_LED, HIGH);
+  delay(3000);
+  Serial.println("Status LED off");
+  digitalWrite(WINDOW_LED, LOW);
+
+
+  Serial.println("Temperature LED on");
+  // White
+  analogWrite(TEMP_LED_R, 255);
+  analogWrite(TEMP_LED_G, 255);
+  analogWrite(TEMP_LED_B, 255);
+  delay(3000);
+
+  Serial.println("Temperature LED: Too Hot/Dry");
+  // Red
+  analogWrite(TEMP_LED_R, 255);
+  analogWrite(TEMP_LED_G, 0);
+  analogWrite(TEMP_LED_B, 0);
+  delay(3000);
+
+  Serial.println("Temperature LED: Too Cold/Wet");
+  // Blue
+  analogWrite(TEMP_LED_R, 0);
+  analogWrite(TEMP_LED_G, 0);
+  analogWrite(TEMP_LED_B, 255);
+  delay(3000);
+
+  Serial.println("Temperature LED: Just Right");
+  // Green
+  analogWrite(TEMP_LED_R, 0);
+  analogWrite(TEMP_LED_G, 255);
+  analogWrite(TEMP_LED_B, 0);
+  delay(3000);
+  
+  // Timing to cycle through the color spectrum in 5 seconds
+  int totalSteps = 6 * 256; // 6 color transitions, 256 steps each
+  int totalTime = 5000; // Total time for the color sweep in milliseconds
+  int delayTime = totalTime / totalSteps; // Time to delay between each step
+
+  // Sweep through the color spectrum
+
+  for (int i = 0; i < 256; i++) {
+    // Red to Yellow
+    analogWrite(TEMP_LED_R, 255);
+    analogWrite(TEMP_LED_G, i);
+    analogWrite(TEMP_LED_B, 0);
+    delay(delayTime);
+  }
+
+  for (int i = 0; i < 256; i++) {
+    // Yellow to Green
+    analogWrite(TEMP_LED_R, 255 - i);
+    analogWrite(TEMP_LED_G, 255);
+    analogWrite(TEMP_LED_B, 0);
+    delay(delayTime);
+  }
+
+  for (int i = 0; i < 256; i++) {
+    // Green to Cyan
+    analogWrite(TEMP_LED_R, 0);
+    analogWrite(TEMP_LED_G, 255);
+    analogWrite(TEMP_LED_B, i);
+    delay(delayTime);
+  }
+
+  for (int i = 0; i < 256; i++) {
+    // Cyan to Blue
+    analogWrite(TEMP_LED_R, 0);
+    analogWrite(TEMP_LED_G, 255 - i);
+    analogWrite(TEMP_LED_B, 255);
+    delay(delayTime);
+  }
+
+  for (int i = 0; i < 256; i++) {
+    // Blue to Magenta
+    analogWrite(TEMP_LED_R, i);
+    analogWrite(TEMP_LED_G, 0);
+    analogWrite(TEMP_LED_B, 255);
+    delay(delayTime);
+  }
+
+  for (int i = 0; i < 256; i++) {
+    // Magenta to Red
+    analogWrite(TEMP_LED_R, 255);
+    analogWrite(TEMP_LED_G, 0);
+    analogWrite(TEMP_LED_B, 255 - i);
+    delay(delayTime);
+  }
+
+  // Turn off Temperature LED
+  Serial.println("Temperature LED off");
+  analogWrite(TEMP_LED_R, 0);
+  analogWrite(TEMP_LED_G, 0);
+  analogWrite(TEMP_LED_B, 0);
+
+
+  Serial.println("LED test complete");
 }
 
 void testMenu(){
@@ -1515,11 +1745,43 @@ void testMenu(){
 
 }
 
-
+/**
+ * @brief Simulates rain occuring in a random interval between 1 and 5 minutes
+ * 
+ * This function simulates rain occuring in a random interval between 1 and 5 minutes.
+ * When called, it will roll a random number between 1 and 5 and print that it is raining only
+ * if the number is 1.
+ * Updates the rain flag in the Monitor struct.
+ * 
+ */
 void simulateRain(){
-  //TODO: Add rain simulation functionality
+  // 1 in 5 chance of rain
+  int raining = ((rand() % 5 + 1) == 1);
+
+  // Inform user if it's raining through serial monitor
+  if(raining){
+    Serial.println("It's raining!");
+  }
+  else{
+    Serial.println("It's not raining!");
+  }
+
+  // Set rain flag
+  Monitor.Rain = raining;
+
+
 }
 
+/**
+ * @brief Generates random temperature and humidity values to simulate readings
+ * 
+ * This function simulates temperature and humidity readings with random values.
+ * The temperature will be a random value between 10C and 30C.
+ * The humidity will be a random value between 30% and 70%.
+ * 
+ * 
+ * 
+ */
 void simulateTemperature(){
   //simulate random temperature reading between 10C and 30C
   temperature = rand() % 20 + 10;
@@ -1528,38 +1790,6 @@ void simulateTemperature(){
   humidity = rand() % 40 + 30;
   
 }
-
-void simulateWindow(){
-  // show the current state of pointers
-    Serial.print("current_menu: ");
-    Serial.println(current_menu->title);
-    Serial.print("current_menu->parent: ");
-    Serial.println(current_menu->parent == nullptr ? "nullptr" : current_menu->parent->title);
-    Serial.print("current_menu->children: ");
-    for (int i = 0; i < current_menu->children.size(); i++) {
-      Serial.print(current_menu->children[i] == nullptr ? "nullptr" : current_menu->children[i]->title);
-      Serial.print(" ");
-    }
-    Serial.println();
-    Serial.print("current_menu->functions: ");
-    for (int i = 0; i < current_menu->functions.size(); i++) {
-      Serial.print(current_menu->functions[i] == nullptr ? "nullptr" : "function");
-      Serial.print(" ");
-    }
-    Serial.println();
-
-    // Tell the user what they can do
-    Serial.println("a: up, b: down, c: select, d: back");
-
-
-    // Print the current menu
-    Serial.println(current_menu->title);
-    for (int i = 0; i < current_menu->choices.size(); i++) {
-      Serial.print(i == current_menu->currentSelection ? ">" : " ");
-      Serial.println(current_menu->choices[i]);
-    }
-}
-
 
 /**
  * printMenuStatus() - Prints the current menu status to the serial monitor

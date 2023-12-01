@@ -216,11 +216,11 @@ char keymap[ROWS][COLS] = {
 /* Stepper Motor */
 #define STEPPER_PIN_1 26                  // located on (A0)
 #define STEPPER_PIN_2 25                  // located on (A1)
-#define STEPPER_PIN_3 34                  // located on (A2)
-#define STEPPER_PIN_4 39                  // located on (A3)
+#define STEPPER_PIN_3 34                  // located on (A2) * (Input only)
+#define STEPPER_PIN_4 39                  // located on (A3) * (Input only)
 
 /* LEDS */
-#define POWER_LED 36                      // located on (A4)
+#define POWER_LED 36                      // located on (A4) * (Input only)
 #define WINDOW_LED 4                      // located on (A5)
 #define TEMP_LED_R 5                      // located on (SCK)
 #define TEMP_LED_G 18                     // located on (MOSI)
@@ -301,7 +301,6 @@ struct userSettings{
 
   // Other settings
   //type window_position; //Current position of window (manually set to open or closed)
-  
 };
 
 /* Start with default values:
@@ -375,11 +374,6 @@ struct MenuStruct {
 
 typedef MenuStruct Menu;
 Menu* current_menu = new Menu; //current menu position (used for navigation)
-Menu* main_menu = new Menu; //main menu (absolute)
-Menu* start_menu = new Menu; //start menu (relative to main menu)
-Menu* settings_menu = new Menu; //settings menu (relative to main menu)
-Menu* test_menu = new Menu; //test menu (relative to main menu)
-
 
 /**************
  * Prototypes *
@@ -400,7 +394,7 @@ void handleLEDs(void);
 
 
 // Menu construction functions
-void setParentMenu(Menu* parent_menu, Menu child_menu);
+void setParentMenu(Menu* parent_menu, Menu& child_menu);
 void addChildMenu(Menu* parent_menu, Menu child_menu);
 void addFunction(Menu* menu, MenuFunction function);
 
@@ -408,8 +402,9 @@ void addFunction(Menu* menu, MenuFunction function);
 // Menu navigation functions
 void scrollUp(Menu &menu);
 void scrollDown(Menu &menu);
-void selectOption(Menu*& current_menu);
+void selectOption(Menu current_menu);
 void back();
+void printMenu(Menu menu);
 void printMenuStatus(Menu* menu);
 
 
@@ -501,7 +496,7 @@ const long LM393_sample_interval = settings.rain_interval;    // interval at whi
 
 /* Simulated Menu */
 unsigned long menu_previous_millis = 0;                           // will store last time menu was opened/closed
-const long menu_refresh_interval = 5 * 1000;                      // interval at which to open/close menu (in milliseconds)
+const long menu_refresh_interval = 0.1 * 1000;                      // interval at which to open/close menu (in milliseconds)
 
 
 /*************
@@ -514,11 +509,11 @@ void loop() {
 
   if(Debug)
   {
-    //testKeypad();
+    testKeypad();
     //testDisplay();
     //testStepper();
     //testAlarm();
-    //testLEDs();
+    testLEDs();
 
     /*
     // Print address of current_menu
@@ -530,19 +525,19 @@ void loop() {
     */
 
     if(check_interval(&menu_previous_millis, menu_refresh_interval)) {
-      testMenu();
+      //testMenu();
     }
     
 
-    /*
+    
     if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
-      (simulatedRain) ? simulateRain() : testRainSensor();
+      //(simulatedRain) ? simulateRain() : testRainSensor();
     }
 
     if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
-      (simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
+      //(simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
     }
-    */
+    
 
   }
   else
@@ -550,6 +545,10 @@ void loop() {
   /* Check for input from the keypad */
   if (Monitor.Keypad_on){
     handleKeypad();
+  }
+  else{
+    // No keypad connected, check if Serial Monitor input is available
+    testMenu();
   }
 
   /* Check for input from the rain sensor */
@@ -593,12 +592,12 @@ void loop() {
  * Functions *
  *************/
 
-void setParentMenu(Menu* parent_menu, Menu child_menu) {
+void setParentMenu(Menu* parent_menu, Menu& child_menu) {
   child_menu.parent = parent_menu;
 }
 
-void addChildMenu(Menu* parent_menu, Menu child_menu) {
-  parent_menu->children.push_back(&child_menu);
+void addChildMenu(Menu* parent_menu, Menu* child_menu) {
+  parent_menu->children.push_back(child_menu);
 }
 
 void addFunction(Menu* menu, MenuFunction function) {
@@ -640,157 +639,264 @@ void selectOption(Menu*& current_menu) {
   } 
   else {
 
-    // Check if the current selection is a function or a submenu
+    // Check if the current selection has a function associated with it
     if (current_menu->currentSelection < current_menu->functions.size()
     && current_menu->functions[current_menu->currentSelection] != nullptr) {
-      // There is a function associated with the current selection
+      // Call the function associated with the current selection
       current_menu->functions[current_menu->currentSelection]();
-      back();
-    } 
+    }
+    // Check if the current selection has a submenu associated with it
     else if (current_menu->currentSelection < current_menu->children.size() 
     && current_menu->children[current_menu->currentSelection] != nullptr) {
       // Change the current menu to the submenu associated with the current selection
       current_menu = current_menu->children[current_menu->currentSelection];
     }
-  }
-}
-
-void back() {
-    if (current_menu->parent != nullptr) {
-        current_menu = current_menu->parent;
+    else {
+      Serial.println("No function or submenu associated with current selection");
     }
+  }
+
 }
 
-/* Supporting Functions */
 
 /**
- * changeTempSettings() - Changes the temperature settings for the monitor
+ * @brief Goes back to the parent menu
  * 
- * (needs to be updated to use the I2C display and keypad)
- * 
- * This function allows the user to change the temperature settings for the monitor.
- * It is called from the changeSettings() function and when the user selects the temperature option
- * from the settings menu.
- * 
- * The user can choose to use a target temperature or temperature limits.
- * If they choose to use a target temperature, they can enter the target temperature
- * and the range of acceptable temperatures around the target temperature.
- * If they choose to use temperature limits, they can enter the upper and lower limits
- * for the temperature.
+ * If the current menu has a parent, then it will change the current menu to the parent menu.
+ * If the current menu has no parent, then it is the main menu and it will not change the current menu.
  * 
  */
-void changeTempSettings(){
-  Serial.println("Do you want to use a target temperature or temperature limits?");
-  Serial.print("1. Target Temperature: ");
-  Serial.print(settings.targetTemperature);
-  Serial.print("C ± ");
-  Serial.print(settings.tempRange);
-  Serial.println("C");
+void back() {
+  // Print the fields of the current menu
+  //printMenu(*current_menu);
 
-  Serial.print("2. Temperature Limits: ");
-  Serial.print(settings.lowerTemp);
-  Serial.print("C to ");
-  Serial.print(settings.upperTemp);
-  Serial.println("C");
-  
-  Serial.println("3. Exit");
+  if (current_menu->parent != NULL) {
+    // Inform the user what parent menu they are going back to
+    Serial.print("Going back to ");
+    Serial.println(current_menu->parent->title);
 
-  int choice = 0;
-  scanf("%d", &choice);
-
-  switch(choice){
-    case 1:
-      Monitor.Use_Target_Temp = true;
-      Serial.print("Enter target temperature (c): ");
-      scanf("%f", &settings.targetTemperature);
-      
-      Serial.print("Enter temperature range (c): ");
-      scanf("%f", &settings.tempRange);
-      break;
-    
-    case 2:
-      Monitor.Use_Target_Temp = false;
-      Serial.print("Enter upper temperature limit (c): ");
-      scanf("%f", &settings.upperTemp);
-      
-      Serial.print("Enter lower temperature limit (c): ");
-      scanf("%f", &settings.lowerTemp);
-      break;
-    
-    case 3:
-    // Go back to the settings menu
-
-      break;
-    
-    default:
-      printf("Invalid choice\n");
-      break;
+   // Change the current menu to the parent menu
+    current_menu = current_menu->parent;
   }
+  else {
+    Serial.println("No parent menu");
+  }
+
+
 }
+
+/* User Setting Functions */
 
 /**
- * changeHumiditySettings() - Changes the humidity settings for the monitor
+ * updateUserSettings() - Updates the user settings
+ * @brief Takes keypad input until # is pressed
  * 
- * (needs to be updated to use the I2C display and keypad)
+ * This function is used to change the user settings stored in the settings struct.
+ * It is called by numerous functions to allow the user to change the settings.
+ * if the setting is a time, then it converts the input from minutes to milliseconds.
  * 
- * This function allows the user to change the humidity settings for the monitor.
- * It is called from the changeSettings() function and when the user selects the humidity option
- * from the settings menu.
- * 
- * The user can choose to use a target humidity or humidity limits.
- * If they choose to use a target humidity, they can enter the target humidity
- * and the range of acceptable humidity around the target humidity.
- * If they choose to use humidity limits, they can enter the upper and lower limits
- * for the humidity.
+ * @param setting - The setting to change
+ * @param isTime - Whether or not the setting is a time
  * 
  */
-void changeHumiditySettings(){
-  Serial.println("Do you want to use a target humidity or humidity limits?");
-  
-  Serial.print("1. Target Humidity: ");
-  Serial.print(settings.targetHumidity);
-  Serial.print("% ± ");
-  Serial.print(settings.humidityRange);
-  Serial.println("%");
+template <typename UserSetting>
+void updateUserSettings(UserSetting& setting, bool isTime) {
+  // Print the current setting
+  Serial.print("Current setting: ");
+  Serial.println(setting);
 
-  Serial.print("2. Humidity Limits: ");
-  Serial.print(settings.lowerHumidity);
-  Serial.print("% to ");
-  Serial.print(settings.upperHumidity);
-  Serial.println("%");
-  
-  Serial.println("3. Exit");
+  String input = "";
 
-  int choice = 0;
-  scanf("%d", &choice);
-
-  switch(choice){
-    case 1:
-      Monitor.Use_Target_Humidity = true;
-      Serial.print("Enter target humidity (%): ");
-      scanf("%f", &settings.targetHumidity);
-      
-      Serial.print("Enter humidity range (%): ");
-      scanf("%f", &settings.humidityRange);
-      break;
-    
-    case 2:
-      Monitor.Use_Target_Humidity = false;
-      Serial.print("Enter upper humidity limit (%): ");
-      scanf("%f", &settings.upperHumidity);
-      
-      Serial.print("Enter lower humidity limit (%): ");
-      scanf("%f", &settings.lowerHumidity);
-      break;
-    
-    case 3:
-      break;
-    
-    default:
-      Serial.println("Invalid choice");
-      break;
+  // Determine if input comes from keypad or Serial Monitor
+  if (Monitor.Keypad_on){
+    // Get input from keypad
+    Serial.println("Enter new setting (press # when done):");
+    char key = 0;
+    while (key != '#') {
+      key = get_key();
+      if (key != 0) {
+        input += key;
+        Serial.print(key);
+      }
+    }
+    Serial.println();
   }
+  else{
+    // Get input from Serial Monitor
+    Serial.println("Enter new setting (press enter when done):");
+    while (Serial.available() == 0) {
+      // Wait for input
+    }
+    input = Serial.readStringUntil('\n');
+  }
+
+  // Convert input to appropriate type
+  if (isTime) {
+    setting = strtoul(input.c_str(), NULL, 10) * 60 * 1000;
+  }
+  else {
+    setting = input.toDouble();
+  }
+
+  // Print the new setting
+  Serial.print("New setting: ");
+  Serial.println(setting);
+
 }
+
+/** updateTargetTemperature() - Updates the target temperature and the range of acceptable temperatures
+ * @brief Takes keypad input until # is pressed
+ *  stores the target temperature and the range of acceptable temperatures in the settings struct.
+ * 
+ */
+void updateTargetTemp() {
+  // Print the current target temperature
+  Serial.print("Current target temperature: ");
+  Serial.println(settings.targetTemperature);
+
+  // Determine if user wants to change the target temperature
+  Serial.println("Do you want to change the target temperature?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.targetTemperature, false);
+}
+
+void updateTempRange() {
+  // Print the current temperature range
+  Serial.print("Current temperature range: ");
+  Serial.println(settings.tempRange);
+
+  // Determine if user wants to change the temperature range
+  Serial.println("Do you want to change the temperature range?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.tempRange, false);
+}
+
+void updateUpperTemp() {
+  // Print the current upper temperature
+  Serial.print("Current upper temperature: ");
+  Serial.println(settings.upperTemp);
+
+  // Determine if user wants to change the upper temperature
+  Serial.println("Do you want to change the upper temperature?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.upperTemp, false);
+}
+
+void updateLowerTemp() {
+  // Print the current lower temperature
+  Serial.print("Current lower temperature: ");
+  Serial.println(settings.lowerTemp);
+
+  // Determine if user wants to change the lower temperature
+  Serial.println("Do you want to change the lower temperature?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.lowerTemp, false);
+}
+
+void updateTargetHumidity() {
+  // Print the current target humidity
+  Serial.print("Current target humidity: ");
+  Serial.println(settings.targetHumidity);
+
+  // Determine if user wants to change the target humidity
+  Serial.println("Do you want to change the target humidity?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.targetHumidity, false);
+}
+
+void updateHumidityRange() {
+  // Print the current humidity range
+  Serial.print("Current humidity range: ");
+  Serial.println(settings.humidityRange);
+
+  // Determine if user wants to change the humidity range
+  Serial.println("Do you want to change the humidity range?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.humidityRange, false);
+}
+
+void updateUpperHumidity() {
+  // Print the current upper humidity
+  Serial.print("Current upper humidity: ");
+  Serial.println(settings.upperHumidity);
+
+  // Determine if user wants to change the upper humidity
+  Serial.println("Do you want to change the upper humidity?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.upperHumidity, false);
+}
+
+void updateLowerHumidity() {
+  // Print the current lower humidity
+  Serial.print("Current lower humidity: ");
+  Serial.println(settings.lowerHumidity);
+
+  // Determine if user wants to change the lower humidity
+  Serial.println("Do you want to change the lower humidity?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.lowerHumidity, false);
+}
+
+void updateDHTInterval() {
+  // Print the current DHT interval
+  Serial.print("Current DHT interval: ");
+  Serial.print(settings.DHT_interval / (60 * 1000)); // Convert from milliseconds to minutes
+  Serial.println("minutes");
+
+  // Determine if user wants to change the DHT interval
+  Serial.println("Do you want to change the DHT interval?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.DHT_interval, true);
+}
+
+void updateRainInterval() {
+  // Print the current rain interval
+  Serial.print("Current rain interval: ");
+  Serial.print(settings.rain_interval / (60 * 1000)); // Convert from milliseconds to minutes
+  Serial.println("minutes");
+
+  // Determine if user wants to change the rain interval
+  Serial.println("Do you want to change the rain interval?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.rain_interval, true);
+}
+
+void updateRainTimeout() {
+  // Print the current rain timeout
+  Serial.print("Current rain timeout: ");
+  Serial.print(settings.rain_timeout / (60 * 1000)); // Convert from milliseconds to minutes
+  Serial.println("minutes");
+
+  // Determine if user wants to change the rain timeout
+  Serial.println("Do you want to change the rain timeout?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.rain_timeout, true);
+}
+
+void updateMonitorTimeout() {
+  // Print the current monitor timeout
+  Serial.print("Current monitor timeout: ");
+  Serial.print(settings.monitor_timeout / (60 * 1000)); // Convert from milliseconds to minutes
+  Serial.println("minutes");
+
+  // Determine if user wants to change the monitor timeout
+  Serial.println("Do you want to change the monitor timeout?");
+  Serial.println("1. Yes");
+  Serial.println("2. No");
+  updateUserSettings(settings.monitor_timeout, false);
+}
+
 
 /**
  * changeMeasurementInterval() - Changes the measurement intervals for the DHT sensor and the rain sensor
@@ -1420,10 +1526,75 @@ void setupMenu() {
     {nullptr, nullptr, nullptr, /*TODO: Add shutdown function */}
   };
 
-  // Connect menus
-  setParentMenu(start_menu, *main_menu);
+  Menu* TempMenu = new Menu{
+    "Temperature",
+    {"Use Target Temperature", "Use Temperature Limits", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+
+  Menu* targetTempMenu = new Menu{
+    "Target Temperature",
+    {"Target Temperature", "Temperature Range", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+
+  Menu* tempLimitsMenu = new Menu{
+    "Temperature Limits",
+    {"Lower Temperature", "Upper Temperature", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+
+  Menu* humidityMenu = new Menu{
+    "Humidity",
+    {"Use Target Humidity", "Use Humidity Range", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+
+  Menu* targetHumidityMenu = new Menu{
+    "Target Humidity",
+    {"Target Humidity", "Humidity Range", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+
+  Menu* humidityLimitsMenu = new Menu{
+    "Humidity Limits",
+    {"Lower Humidity", "Upper Humidity", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+  
+  Menu* IntervalMenu = new Menu{
+    "Measurement Interval",
+    {"DHT Interval", "Rain Interval", "Monitor Interval", "Exit"},
+    0,
+    nullptr,
+    {},
+    {}
+  };
+
+
   //* Connect menus */ 
+  /* 1st level menus */
+
   // start menu
+  setParentMenu(main_menu, *start_menu);
   addFunction(start_menu, handleStepper);
   addFunction(start_menu, handleAlarm);
   addFunction(start_menu, handleSleep);
@@ -1431,15 +1602,19 @@ void setupMenu() {
   addFunction(start_menu, back);
 
   // settings menu
-  setParentMenu(settings_menu, *main_menu);
-  addFunction(settings_menu, changeTempSettings);
-  addFunction(settings_menu, changeHumiditySettings);
-  addFunction(settings_menu, changeMeasurementInterval);
+  setParentMenu(main_menu, *settings_menu);
+  addChildMenu(settings_menu, TempMenu);
+  addChildMenu(settings_menu, humidityMenu);
+  addChildMenu(settings_menu, IntervalMenu);
+
+  addFunction(settings_menu, nullptr);
+  addFunction(settings_menu, nullptr);
+  addFunction(settings_menu, nullptr);
   addFunction(settings_menu, changeSleepMode);
   addFunction(settings_menu, back);
 
   // test menu
-  setParentMenu(test_menu, *main_menu);
+  setParentMenu(main_menu, *test_menu);
   addFunction(test_menu, testKeypad);
   addFunction(test_menu, testDisplay);
   addFunction(test_menu, testRainSensor);
@@ -1448,17 +1623,69 @@ void setupMenu() {
   addFunction(test_menu, testLEDs);
   addFunction(test_menu, back);
 
+  /* 2nd level menus */
+  // temperature menu
+  setParentMenu(settings_menu, *TempMenu);
+  addChildMenu(TempMenu, targetTempMenu);
+  addChildMenu(TempMenu, tempLimitsMenu);
+  addFunction(TempMenu, nullptr);
+  addFunction(TempMenu, nullptr); //TODO: Add set temperature range function
+  addFunction(TempMenu, back);
 
+  // humidity menu
+  setParentMenu(settings_menu, *humidityMenu);
+  addChildMenu(humidityMenu, targetHumidityMenu);
+  addChildMenu(humidityMenu, humidityLimitsMenu);
+  addFunction(humidityMenu, nullptr); //TODO: Add set humidity function
+  addFunction(humidityMenu, nullptr); //TODO: Add set humidity range function
+  addFunction(humidityMenu, back);
+
+  // measurement interval menu
+  setParentMenu(settings_menu, *IntervalMenu);
+  addFunction(IntervalMenu, updateDHTInterval);
+  addFunction(IntervalMenu, updateRainInterval);
+  addFunction(IntervalMenu, updateMonitorTimeout);
+  addFunction(IntervalMenu, back);
+
+  /* 3rd level menus */
+  // target temperature menu
+  setParentMenu(settings_menu, *targetTempMenu);  // Go back to settings menu
+  addFunction(targetTempMenu, updateTargetTemp); // Set target temperature function
+  addFunction(targetTempMenu, updateTempRange); // Set temperature range function
+  addFunction(targetTempMenu, back);
+
+  // temperature limits menu
+  setParentMenu(settings_menu, *tempLimitsMenu);  // Go back to settings menu
+  addFunction(tempLimitsMenu, updateLowerTemp); // Set lower temperature function
+  addFunction(tempLimitsMenu, updateUpperTemp); // Set upper temperature function
+  addFunction(tempLimitsMenu, back);
+
+  // target humidity menu
+  setParentMenu(settings_menu, *targetHumidityMenu);  // Go back to settings menu
+  addFunction(targetHumidityMenu, updateTargetHumidity); // Set target humidity function
+  addFunction(targetHumidityMenu, updateHumidityRange); // Set humidity range function
+  addFunction(targetHumidityMenu, back);
+
+  // humidity limits menu
+  setParentMenu(settings_menu, *humidityLimitsMenu);  // Go back to settings menu
+  addFunction(humidityLimitsMenu, updateLowerHumidity); // Set lower humidity function
+  addFunction(humidityLimitsMenu, updateUpperHumidity); // Set upper humidity function
+  addFunction(humidityLimitsMenu, back);
+
+  // Sanity check Menus
+  std::vector<Menu*> menus = {main_menu, start_menu, settings_menu, test_menu, 
+  TempMenu, targetTempMenu, tempLimitsMenu, 
+  humidityMenu, targetHumidityMenu, humidityLimitsMenu, 
+  IntervalMenu};
+
+  for (Menu* menu : menus) {
+    //Serial.println(menu->title + " Sanity Check:");
+    //printMenu(*menu);
+  }
+
+  
   // Set current menu to main menu
   current_menu = main_menu;
-
-  // Print address of current_menu
-  Serial.print("Address of current_menu: ");
-  Serial.println((uintptr_t)current_menu, HEX);
-
-  // Print address of main_menu
-  Serial.print("Address of main_menu: ");
-  Serial.println((uintptr_t)main_menu, HEX);
 }
 
 void setup() {
@@ -1650,6 +1877,7 @@ void testLEDs(){
   int totalTime = 5000; // Total time for the color sweep in milliseconds
   int delayTime = totalTime / totalSteps; // Time to delay between each step
 
+  Serial.println("Temperature LED: Color Sweep");
   // Sweep through the color spectrum
 
   for (int i = 0; i < 256; i++) {
@@ -1711,37 +1939,51 @@ void testLEDs(){
 }
 
 void testMenu(){
-  // Use Serial Monitor to test menu system
-  printMenuStatus(current_menu);
+  // Will print the current menu status to the serial monitor on the first run
+  static bool updateDisplay = true;
 
-  
   // Check if there's available data on the serial port
   if (Serial.available() > 0) {
     // Read the input
     char input = Serial.read();
+
+    // The display probably needs to be updated
+    updateDisplay = true;
     
     // Perform the corresponding action
     switch (input) {
       case 'a':
+      case 'A':
         scrollUp(*current_menu);
         break;
       case 'b':
+      case 'B':
         scrollDown(*current_menu);
         break;
       case 'c':
+      case 'C':
         selectOption(current_menu);
         break;
       case 'd':
+      case 'D':
         back();
         break;
       default:
+        // Invalid input
+        updateDisplay = false;
         break;
     }
-    // Print the current menu after the action
-    printMenuStatus(current_menu);
-    
-    //simulateWindow();
   }
+
+  // Check if the display needs to be updated
+  if(updateDisplay){
+    // Print the current menu
+    //printMenu(*current_menu);
+    printMenuStatus(current_menu);
+
+    updateDisplay = false;
+  }
+  
 
 }
 
@@ -1835,5 +2077,33 @@ void printMenuStatus(Menu* menu) {
     }
   } else {
     Serial.println("No menu selected");
+  }
+}
+
+void printMenu(Menu menu) {
+  Serial.println("Title: " + menu.title);
+  Serial.println("Choices:");
+  for (const auto& choice : menu.choices) {
+    Serial.println("  " + choice);
+  }
+  Serial.println("Current Selection: " + String(menu.currentSelection));
+  if (menu.parent != nullptr) {
+    Serial.println("Parent: " + menu.parent->title);
+  } else {
+    Serial.println("Parent: None");
+  }
+  Serial.println("Children:");
+  for (const auto& child : menu.children) {
+    if (child != nullptr) {
+      Serial.println("  " + child->title);
+    }
+  }
+  Serial.println("Functions:");
+  for (const auto& function : menu.functions) {
+    if (function != nullptr) {
+      Serial.println("  Function exists");
+    } else {
+      Serial.println("  No function");
+    }
   }
 }

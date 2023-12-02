@@ -160,7 +160,7 @@
 
 // The pins for I2C are defined by the Wire-library. 
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3D ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
 
 /* Keypad Definitions */
 #define ROWS 4
@@ -190,10 +190,6 @@ char keymap[ROWS][COLS] = {
 
 /* Stepper Motor definitions */
 //FIXME: actually define these
-//#define STEPPER_PIN_1 2                   // located on pin 2
-//#define STEPPER_PIN_2 4                   // located on pin 4
-//#define STEPPER_PIN_3 15                  // located on pin 15
-//#define STEPPER_PIN_4 16                  // located on pin 16
 
 /* Serial Communication rate */
 #define BAUD_RATE  115200
@@ -216,15 +212,15 @@ char keymap[ROWS][COLS] = {
 /* Stepper Motor */
 #define STEPPER_PIN_1 26                  // located on (A0)
 #define STEPPER_PIN_2 25                  // located on (A1)
-#define STEPPER_PIN_3 34                  // located on (A2) * (Input only)
-#define STEPPER_PIN_4 39                  // located on (A3) * (Input only)
+#define STEPPER_PIN_3 12                  // located on [12]
+#define STEPPER_PIN_4 33                  // located on [33]
 
 /* LEDS */
-#define POWER_LED 36                      // located on (A4) * (Input only)
-#define WINDOW_LED 4                      // located on (A5)
-#define TEMP_LED_R 5                      // located on (SCK)
-#define TEMP_LED_G 18                     // located on (MOSI)
-#define TEMP_LED_B 19                     // located on (MISO)
+#define POWER_LED 32                      // located on [32]
+#define WINDOW_LED 4                      // located on (A5) 
+#define TEMP_LED_R 18                      // located on (MOSI)
+#define TEMP_LED_G 5                     // located on (SCK)
+#define TEMP_LED_B 19                     // located on (MISO) [miso]
 
 /* Alarm Buzzer */
 #define ALARM_PIN 21                   // located on (21)
@@ -391,6 +387,7 @@ void handleStepper(void);
 void handleAlarm(void);
 void handleSleep(void);
 void handleLEDs(void);
+void printWifiStatus(void);
 
 
 // Menu construction functions
@@ -421,6 +418,10 @@ bool check_interval(unsigned long* previousMillis, long interval);
 char get_key(void);
 void drawGraph(void);
 void drawTempGraph(void);
+void drawHumidityGraph(void);
+void drawMenu(Menu menu);
+void drawMenuStatus(Menu menu);
+void writeText(String text, int lines);
 
 
 // Setup functions
@@ -466,7 +467,8 @@ bool Debug = true; // Set to true to enable debug mode
 bool simulatedRain = false; // Set to true to simulate rain
 bool simulatedTemperature = false; // Set to true to simulate temperature
 
-
+// Global variable to store the last known WiFi status
+wl_status_t lastWifiStatus = WL_IDLE_STATUS;
 
 // ToggleController
 std::map<String, bool> globalToggleStates;
@@ -498,6 +500,10 @@ const long LM393_sample_interval = settings.rain_interval;    // interval at whi
 unsigned long menu_previous_millis = 0;                           // will store last time menu was opened/closed
 const long menu_refresh_interval = 0.1 * 1000;                      // interval at which to open/close menu (in milliseconds)
 
+/* Simulated Test */
+unsigned long test_previous_millis = 0;                           // will store last time test was run
+const long test_refresh_interval = 10 * 1000;                      // interval at which to run test (in milliseconds)
+
 
 /*************
  *   Loop    *
@@ -506,44 +512,21 @@ void loop() {
   /* Perform Sinric Pro actions*/
   SinricPro.handle();
 
-
-  if(Debug)
-  {
-    testKeypad();
-    //testDisplay();
-    //testStepper();
-    //testAlarm();
-    testLEDs();
-
-    /*
-    // Print address of current_menu
-    Serial.print("Address of current_menu: ");
-    Serial.println((uintptr_t)current_menu, HEX);
-
-    Serial.println("Current Menu");
-    //printMenuStatus(current_menu);
-    */
-
-    if(check_interval(&menu_previous_millis, menu_refresh_interval)) {
-      //testMenu();
-    }
-    
+  /* Check if WiFi status has changed */
+  printWifiStatus();
 
     
-    if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
-      //(simulatedRain) ? simulateRain() : testRainSensor();
-    }
-
-    if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
-      //(simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
-    }
-    
-
+  if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
+    //(simulatedRain) ? simulateRain() : testRainSensor();
   }
-  else
-  {
+
+  if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
+    //(simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
+  }
+
   /* Check for input from the keypad */
   if (Monitor.Keypad_on){
+    Serial.println("Keypad on");
     handleKeypad();
   }
   else{
@@ -554,14 +537,14 @@ void loop() {
   /* Check for input from the rain sensor */
   if (Monitor.RainSensor_on){
     handleRainSensor();
-}
+  }
 
   /* Measure temperature and humidity. */
   if (Monitor.DHT_on) {
     handleTemperaturesensor();
 
-}
-  
+  }
+
   /* Display temperature and humidity on the display */
   if (Monitor.Display_on){
     handleDisplay();
@@ -579,13 +562,13 @@ void loop() {
 
   /* Check if sleep mode needs to be activated */
   if (Monitor.Sleep){
-    //handleSleep();
+    //goToSleep();
   }
 
   /* Update status LEDs */
   //handleLEDs();
 
-  }
+
 }
   
 /*************
@@ -758,6 +741,11 @@ void updateTargetTemp() {
   Serial.println("Do you want to change the target temperature?");
   Serial.println("1. Yes");
   Serial.println("2. No");
+
+
+
+
+
   updateUserSettings(settings.targetTemperature, false);
 }
 
@@ -1045,16 +1033,31 @@ bool check_interval(unsigned long* previousMillis, long interval) {
 
 /* get key press */
 char get_key() {
+  static unsigned long lastPressTime = 0;  // Time of the last key press
+  const unsigned long debounceTime = 50;   // Debounce time in milliseconds
+
+
   if (keypad.available()) {
+    // Check if enough time has passed since the last key press
+    if (millis() - lastPressTime < debounceTime) {
+      return 0;  // Not enough time has passed, ignore this key press
+    }
+    
+
     //  datasheet page 15 - Table 1
     int k = keypad.getEvent();
+
+    // Mask to identify key press
     bool pressed = k & 0x80;
+
+    // Mask to identify key row and column
     k &= 0x7F;
     k--;
+    
     uint8_t row = k / 10;
     uint8_t col = k % 10;
 
-    ///*
+    /*
     if (pressed)
       Serial.print("PRESS\tR: ");
     else
@@ -1065,8 +1068,19 @@ char get_key() {
     Serial.print(" - ");
     Serial.print(keymap[col][row]);
     Serial.println();
-    //*/
-    return keymap[col][row];
+    */
+
+    // Save the time of the key press
+    if (pressed) {
+      lastPressTime = millis();
+    }
+
+
+    // Band-aid fix for keypad bug? only return key release, not press
+    if (!pressed) {
+      return keymap[col][row];
+    }
+    //return keymap[col][row];
   }
   return 0;
 }
@@ -1247,9 +1261,25 @@ void handleRainSensor(){
  *          - Timeout/Sleep mode?
  */
 void handleKeypad(){
+  // Attempt to print the display, will be set to false if no key is pressed
+  bool updateDisplay = true;
+  
+  // Check if enough time has passed since the last key press
+  static unsigned long lastPressTime = 0;  // Time of the last key press
+  const unsigned long debounceTime = 50;   // Debounce time in milliseconds
+
+  char key = get_key();
+
+  // If a key is pressed and enough time has passed since the last key press
+  if (key && (millis() - lastPressTime > debounceTime)) {
+    lastPressTime = millis();  // Update the time of the last key press
+  }
+  else {
+    return; // No key pressed or not enough time has passed since last key press
+  }
 
   // analyze user inputs
-  switch (char key = get_key()) {
+  switch (key) {
     
     // Navigation keys
     case 'A':
@@ -1289,12 +1319,20 @@ void handleKeypad(){
     case '8':
     case '9':
       Serial.println(key);
+      updateDisplay = false;
       //add key press to string (they typed a number);
       break;
 
     // if no key is pressed, do nothing
     default:
+      updateDisplay = false;
       break;
+  }
+
+  // Print the current menu status to the serial monitor
+  if (updateDisplay) {
+    printMenuStatus(current_menu);
+    updateDisplay = false;
   }
 
   //TODO: Add menu system, probably using discrete functions instead of member functions [scrollUP() instead of menu.scrollUp()]
@@ -1306,16 +1344,22 @@ void handleKeypad(){
  *  
  */
 void handleDisplay(){
-  //TODO: Add display functionality
-  Serial.println("Found measurements:");
-  Serial.print("Temperature: ");
-  Serial.print(temperature);
-  Serial.print(" Humidity: ");
-  Serial.println(humidity);
-  Serial.println("Displaying measurements:");
 
-  //Send measurements to display
-  //drawTempGraph();
+
+  //TODO: Add display functionality
+
+  // If the temperature or humidity has changed, update the display
+  if (temperature != lastTemperature || humidity != lastHumidity) {
+    Serial.println("Found measurements:");
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.print(" Humidity: ");
+    Serial.println(humidity);
+    Serial.println("Displaying measurements:");
+
+    //Send measurements to display
+    //drawTempGraph();
+  }
 
   
 }
@@ -1393,21 +1437,12 @@ void setupSinricPro() {
 };
 
 void setupWiFi() {
-  #if defined(ESP8266)
-    WiFi.setSleepMode(WIFI_NONE_SLEEP); 
-    WiFi.setAutoReconnect(true);
-  #elif defined(ESP32)
-    WiFi.setSleep(false); 
-    WiFi.setAutoReconnect(true);
-  #endif
-
+  
+  WiFi.setSleep(false); 
+  WiFi.setAutoReconnect(true);
+  
   WiFi.begin(SSID, PASS);
   Serial.printf("[WiFi]: Connecting to %s", SSID);
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.printf(".");
-    delay(250);
-  }
-  Serial.printf("connected\r\n");
 }
 
 void setupKeypad() {
@@ -1431,7 +1466,7 @@ void setupKeypad() {
 void setupDisplay() {
   //https://learn.adafruit.com/adafruit-128x64-oled-featherwing/arduino-code
   // Initialize display with I2C addr 0x3D
-  if(!display.begin(SCREEN_ADDRESS, true)) {
+  if(!display.begin(SCREEN_ADDRESS)) {
     Serial.println(F("Display not found"));
     Monitor.Display_on = false; //TODO: better user feedback (Visual and/or audible?)
     return;
@@ -1986,6 +2021,25 @@ void testMenu(){
   
 
 }
+
+void printWifiStatus() {
+  wl_status_t currentWifiStatus = WiFi.status();
+
+  if (currentWifiStatus != lastWifiStatus) {
+    switch (currentWifiStatus) {
+      case WL_CONNECTED:
+        Serial.println("WiFi connected");
+        break;
+      case WL_DISCONNECTED:
+        Serial.println("WiFi disconnected");
+        break;
+      // Add more cases if you want to handle other status codes
+    }
+
+    lastWifiStatus = currentWifiStatus;
+  }
+}
+
 
 /**
  * @brief Simulates rain occuring in a random interval between 1 and 5 minutes

@@ -449,8 +449,9 @@ void testStepper(void);
 void testAlarm(void);
 void testLEDs(void);
 
-// Old test functions
+// Oled test functions
 void testdrawstyles(void);
+void printMenuAndMessage(Menu* menu, const String& message);
 
 // Simulated input functions
 void simulateTemperature(void);
@@ -539,6 +540,7 @@ void loop() {
   else{
     // No keypad connected, check if Serial Monitor input is available
     testMenu();
+    printMenuAndMessage(current_menu, "");
   }
 
   /* Check for input from the rain sensor */
@@ -1752,6 +1754,9 @@ void setup() {
   // Rain sensor input
   pinMode(rainDigital, INPUT);
 
+  // DHT sensor
+  dht.setup(DHT_PIN); // data pin 2
+
   // Status LEDs
   pinMode(POWER_LED, OUTPUT);
   pinMode(WINDOW_LED, OUTPUT);
@@ -1786,6 +1791,9 @@ void setup() {
   // Initial readings
   //handleRainSensor();   // check rain sensor
   //handleTemperaturesensor(); // check temperature sensor
+
+  delay(5000);
+  printMenuAndMessage(current_menu, "Hello, world!");  // 5 is the number of items, 0 is the menu index
 }
 
 /********* 
@@ -1836,15 +1844,20 @@ void testRainSensor(){
 }
 
 void testTemperatureSensor(){
-  
+  // Check minimum sampling period (DHT11: 1000ms, DHT22: 2000ms)
+  //Serial.print("Minimum sampling period: ");
+  //Serial.println(dht.getMinimumSamplingPeriod());
+
+
   // Check the status of the sensor
-  Serial.println(dht.getStatusString());
-  
+  if(strcmp(dht.getStatusString(), "OK") != 0){
+    Serial.println(dht.getStatusString());
+  }
+
   temperature = dht.getTemperature();          // get actual temperature in °C
   humidity = dht.getHumidity();                // get actual humidity
   
   Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
-
   //Serial.print("Temperature: ");
   //Serial.print(temperature);
   //Serial.print(" Humidity: ");
@@ -2208,3 +2221,77 @@ void testdrawstyles(void) {
   display.display();
   delay(2000);
 }
+
+
+
+/****************
+ * Loop Rewrite *
+ ***************/
+
+void loop2() {
+  /* Status updates*/
+  // WiFi
+  printWifiStatus();
+  SinricPro.handle();
+
+  // update LEDS
+  handleLEDs();
+
+  // update alarm
+  handleAlarm();
+
+  // update stepper
+  handleStepper();
+
+  /* handle I/O */
+  // weather inputs
+  handleRainSensor();   // check rain sensor (LM393)
+  handleTemperaturesensor(); // check temperature sensor (DHT)
+
+  // Deal with user, NEEDS TO BE REWRITEN
+  handleKeypad();
+  handleDisplay();
+
+
+}
+
+
+
+void printMenuAndMessage(Menu* menu, const String& message) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+
+  // Print the menu on the left side
+  display.setCursor(0, 0);
+  
+  // Print the menu options below the title
+  for (int i = 0; i < menu->choices.size(); i++) {
+    if (i == menu->currentSelection) {
+      // Highlight the selected option
+      display.print("> ");
+    }
+    display.println(menu->choices[i]);
+  }
+
+  // Print the message on the right side
+  int currentLineStart = SCREEN_WIDTH / 2;  // Adjust as needed
+  String word = "";
+  for (char c : message) {
+    if (c == ' ' || c == '\n') {
+      int wordWidth = word.length() * 6;  // Approximate width of a character is 6 pixels
+      if (display.getCursorX() + wordWidth > SCREEN_WIDTH) {
+        display.setCursor(currentLineStart, display.getCursorY() + 10);  // Move to the next line
+      }
+      display.print(word + " ");
+      word = "";
+    } else {
+      word += c;
+    }
+  }
+  display.println(word);  // Print the last word
+
+
+  display.display();
+}
+

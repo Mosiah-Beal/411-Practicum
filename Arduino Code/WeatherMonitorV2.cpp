@@ -153,10 +153,11 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
+#include <Adafruit_SSD1306.h>
 
 /* OLED definitions */
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define SCREEN_HEIGHT 32 // OLED display height, in pixels
 
 // The pins for I2C are defined by the Wire-library. 
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
@@ -232,7 +233,8 @@ char keymap[ROWS][COLS] = {
 
 WeatherMonitor &weatherMonitor = SinricPro[DEVICE_ID];  // make instance of SinricPro device
 DHT dht;                                                // make instance of DHT sensor
-Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_SSD1306 display = Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+//Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_TCA8418 keypad;
 
 /**************
@@ -447,6 +449,9 @@ void testStepper(void);
 void testAlarm(void);
 void testLEDs(void);
 
+// Old test functions
+void testdrawstyles(void);
+
 // Simulated input functions
 void simulateTemperature(void);
 void simulateRain(void);
@@ -501,6 +506,8 @@ unsigned long menu_previous_millis = 0;                           // will store 
 const long menu_refresh_interval = 0.1 * 1000;                      // interval at which to open/close menu (in milliseconds)
 
 /* Simulated Test */
+
+/* Unassigned test */
 unsigned long test_previous_millis = 0;                           // will store last time test was run
 const long test_refresh_interval = 10 * 1000;                      // interval at which to run test (in milliseconds)
 
@@ -526,7 +533,7 @@ void loop() {
 
   /* Check for input from the keypad */
   if (Monitor.Keypad_on){
-    Serial.println("Keypad on");
+    //Serial.println("Keypad on");
     handleKeypad();
   }
   else{
@@ -541,13 +548,18 @@ void loop() {
 
   /* Measure temperature and humidity. */
   if (Monitor.DHT_on) {
-    handleTemperaturesensor();
-
+    if (deviceIsOn) { // Sinric Pro device is turned on, use their handler
+      handleTemperaturesensor();
+    }
+    else if (check_interval(&test_previous_millis, test_refresh_interval)) { // Sinric Pro device is turned off, use the DHT handler
+      testTemperatureSensor();
+    }
+    
   }
 
   /* Display temperature and humidity on the display */
   if (Monitor.Display_on){
-    handleDisplay();
+    //handleDisplay();
   }
 
   /* Check if window needs to be opened or closed */
@@ -1347,6 +1359,7 @@ void handleDisplay(){
 
 
   //TODO: Add display functionality
+  testTemperatureSensor();
 
   // If the temperature or humidity has changed, update the display
   if (temperature != lastTemperature || humidity != lastHumidity) {
@@ -1464,19 +1477,28 @@ void setupKeypad() {
 }
 
 void setupDisplay() {
-  //https://learn.adafruit.com/adafruit-128x64-oled-featherwing/arduino-code
+  //https://learn.adafruit.com/adafruit-oled-featherwing/usage
   // Initialize display with I2C addr 0x3D
-  if(!display.begin(SCREEN_ADDRESS)) {
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println(F("Display not found"));
     Monitor.Display_on = false; //TODO: better user feedback (Visual and/or audible?)
     return;
   }
+  
   Monitor.Display_on = true; //Initialized successfully
   Serial.println("Display initialized!");
 
   // Show initial display buffer contents on the screen --
   // the library initializes this with an Adafruit splash screen.
   display.display();
+  delay(2000); // Pause for 2 seconds
+  display.clearDisplay(); // Clear the buffer
+
+  //display.setRotation(1);
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0,0);
+
 }
 
 /***********************************
@@ -1797,7 +1819,13 @@ void testDisplay(){
   display.clearDisplay();
   display.setCursor(0, 0);
   display.print("Hello World!");
+  yield();
   display.display();
+  
+  // hold for 5 seconds
+  delay(5000);
+
+  testdrawstyles();
 }
 
 void testRainSensor(){
@@ -2160,4 +2188,23 @@ void printMenu(Menu menu) {
       Serial.println("  No function");
     }
   }
+}
+
+void testdrawstyles(void) {
+  display.clearDisplay();
+
+  display.setTextSize(1);             // Normal 1:1 pixel scale
+  display.setTextColor(SSD1306_WHITE);        // Draw white text
+  display.setCursor(0,0);             // Start at top-left corner
+  display.println(F("Hello, world!"));
+
+  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); // Draw 'inverse' text
+  display.println(3.141592);
+
+  display.setTextSize(2);             // Draw 2X-scale text
+  display.setTextColor(SSD1306_WHITE);
+  display.print(F("0x")); display.println(0xDEADBEEF, HEX);
+
+  display.display();
+  delay(2000);
 }

@@ -2256,17 +2256,20 @@ void loop2() {
 }
 
 
-
 void printMenuAndMessage(Menu* menu, const String& message) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
 
+  // Determine the top visible menu item
+  int topItem = max( 0, menu->currentSelection - 3);  // Adjust 3 to the number of items you can display at once
+  //Serial.println(topItem);
+
   // Print the menu on the left side
   display.setCursor(0, 0);
   
   // Print the menu options below the title
-  for (int i = 0; i < menu->choices.size(); i++) {
+  for (int i = topItem; i < min(topItem + 4, (int) menu->choices.size()); i++) {  // Adjust 4 to the number of items you can display at once
     if (i == menu->currentSelection) {
       // Highlight the selected option
       display.print("> ");
@@ -2291,7 +2294,5 @@ void printMenuAndMessage(Menu* menu, const String& message) {
   }
   display.println(word);  // Print the last word
 
-
   display.display();
 }
-

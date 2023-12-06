@@ -29,6 +29,7 @@
  * 
  */
 
+
 /**
  * Window Weather Monitor
  * 
@@ -102,10 +103,10 @@
  * the ESP32 and update rain state.
  * Keypad with interrupt???
  * Be able to turn off screen
- * Set timeout lengths for sensors
+ * Set timeout lengths for sensors (X)
  * Add ESP32 reset funcitonality from keypad input
- * Add test mode to user options
- * User options structure?
+ * Add test mode to user options (X)
+ * User options structure? (X)
  * 
  * 
  * TODO:
@@ -113,14 +114,30 @@
  * - Go over the menu system and make sure it is working properly
  * - Go over the settings and make sure they are being used properly
  * 
- * - Make sure the user can use the Serial Monitor to change settings if the menu system doesn't work
- * - Make sure the user can use the Serial Monitor to test the components if the menu system doesn't work
+ * - Make sure the user can use the Serial Monitor to change settings if the menu system doesn't work (X)
+ * - Make sure the user can use the Serial Monitor to test the components if the menu system doesn't work (X)
  * 
- * - Make sure the menu system works (test sequence of inputs)
+ * - Make sure the menu system works (test sequence of inputs) (X)
+ * 
+ * 
+ * - Move the menu system to a separate file (header and cpp)
+ * - Refactor the Serial monitor output to use a function which can be switched between Serial Monitor and OLED Display
+ * 
+ * - Add option to view current settings
+ * - Add option to reset settings to default
+ * 
+ * - Ensure that strings are not too long for the OLED display
+ * - Hsve dedicated area on OLED display for messages?
+ * 
+ * - Fix the graphing on the OLED display
+ * 
+ * - Add toggle to view current temperature and humidity and/or graph
+ * 
  * 
  * DHT color wires
  * (Green: GND, Yellow: Data, Blue: VCC)
  **/
+
 
 /*************
  * Libraries *
@@ -149,11 +166,18 @@
 #include <Adafruit_TCA8418.h>
 
 /* OLED Display Library */
-#include <SPI.h>
 #include <Wire.h>
+//#include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SH110X.h>
+#include <Fonts/FreeSerif9pt7b.h>
+
+//#include <Adafruit_SH110X.h>
 #include <Adafruit_SSD1306.h>
+
+
+/***********
+ * Defines *
+ **********/
 
 /* OLED definitions */
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
@@ -227,6 +251,7 @@ char keymap[ROWS][COLS] = {
 #define ALARM_PIN 21                   // located on (21)
 
 
+
 /*************
  * Instances *
  *************/
@@ -236,6 +261,8 @@ DHT dht;                                                // make instance of DHT 
 Adafruit_SSD1306 display = Adafruit_SSD1306(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 //Adafruit_SH1107 display = Adafruit_SH1107(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_TCA8418 keypad;
+
+
 
 /**************
  * Structures *
@@ -371,7 +398,8 @@ struct MenuStruct {
   };
 
 typedef MenuStruct Menu;
-Menu* current_menu = new Menu; //current menu position (used for navigation)
+
+
 
 /**************
  * Prototypes *
@@ -408,11 +436,23 @@ void printMenuStatus(Menu* menu);
 
 
 // Setting menu functions
-void changeTempSettings(void);
-void changeHumiditySettings(void);
-void changeMeasurementInterval(void);
-void changeSleepMode(void);
-void changeSettings(void);
+void viewSettings(void);
+void resetSettings(void);
+void restartESP32(void);
+
+// Keypad input functions
+void updateTargetTemp(void);
+void updateTempRange(void);
+void updateUpperTemp(void);
+void updateLowerTemp(void);
+void updateTargetHumidity(void);
+void updateHumidityRange(void);
+void updateUpperHumidity(void);
+void updateLowerHumidity(void);
+void updateDHTInterval(void);
+void updateRainInterval(void);
+void updateRainTimeout(void);
+void updateMonitorTimeout(void);
 
 
 // Supporting functions
@@ -459,9 +499,6 @@ void simulateRain(void);
 
 
 
-
-
-
 /*************
  * Variables *
  ***********************************************
@@ -475,6 +512,9 @@ bool simulatedTemperature = false; // Set to true to simulate temperature
 
 // Global variable to store the last known WiFi status
 wl_status_t lastWifiStatus = WL_IDLE_STATUS;
+
+// Global pointer to the current menu
+Menu* current_menu = new Menu; // Start with an empty menu
 
 // ToggleController
 std::map<String, bool> globalToggleStates;
@@ -561,7 +601,7 @@ void loop() {
 
   /* Display temperature and humidity on the display */
   if (Monitor.Display_on){
-    //handleDisplay();
+    handleDisplay();
   }
 
   /* Check if window needs to be opened or closed */
@@ -584,7 +624,8 @@ void loop() {
 
 
 }
-  
+
+
 /*************
  * Functions *
  *************/
@@ -899,140 +940,9 @@ void updateMonitorTimeout() {
   updateUserSettings(settings.monitor_timeout, false);
 }
 
-
-/**
- * changeMeasurementInterval() - Changes the measurement intervals for the DHT sensor and the rain sensor
- * 
- * (needs to be updated to use the I2C display and keypad)
- * 
- * This function allows the user to change the measurement intervals for the DHT sensor and the rain sensor.
- * It is called from the changeSettings() function and when the user selects the measurement interval option
- * from the settings menu.
- * 
- */
-void changeMeasurementInterval(){
-  printf("Which measurement interval do you want to change?\n");
-  printf("1. DHT Interval\n");
-  printf("2. Rain Interval\n");
-  printf("3. Exit\n");
-
-  int choice = 0;
-  scanf("%d", &choice);
-
-  switch(choice){
-    case 1:
-      printf("Enter DHT interval (ms): ");
-      scanf("%lu", &settings.DHT_interval);
-      break;
-    case 2:
-      printf("Enter rain interval (ms): ");
-      scanf("%lu", &settings.rain_interval);
-      break;
-    case 3:
-      break;
-    default:
-      printf("Invalid choice\n");
-      break;
-  }
-}
-
-/**
- * changeSleepMode() - Changes the sleep mode timeout
- * 
- * (needs to be updated to use the I2C display and keypad)
- * 
- * This function allows the user to change the sleep mode timeout.
- * It is called from the changeSettings() function and when the user selects the sleep mode option
- * from the settings menu.
- * 
- * The user can enter the sleep mode timeout in milliseconds
- * 
- */
-void changeSleepMode(){
-  // Show current sleep mode timeout
-  Serial.print("Current sleep mode timeout: ");
-  Serial.print(settings.monitor_timeout);
-  Serial.println("ms");
-
-  // See if the user wants to change the sleep mode timeout
-  Serial.println("Do you want to change the sleep mode timeout?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-
-  int choice = 0;
-  scanf("%d", &choice);
-
-  if(choice == 1){
-    // Change the sleep mode timeout
-    Serial.print("Enter sleep mode timeout (ms): ");
-    scanf("%lu", &settings.monitor_timeout);
-  }
-  else if(choice == 2){
-    // Go back to the settings menu
-  }
-  else{
-    Serial.println("Invalid choice");
-  }
-}
-
-/**
- * changeSettings() - Changes the settings for the monitor
- * 
- * (This is a backup function in case the menu system doesn't work)
- * 
- * This function allows the user to change the settings for the monitor.
- * It allows the user to change the temperature settings, humidity settings,
- * measurement intervals, and sleep mode timeout.
- * 
- * The user can choose to use a target temperature or temperature limits.
- * If they choose to use a target temperature, they can enter the target temperature
- * and the range of acceptable temperatures around the target temperature.
- * If they choose to use temperature limits, they can enter the upper and lower limits
- * for the temperature.
- * 
- * The user can choose to use a target humidity or humidity limits.
- * If they choose to use a target humidity, they can enter the target humidity
- * and the range of acceptable humidity around the target humidity.
- * If they choose to use humidity limits, they can enter the upper and lower limits
- * for the humidity.
- * 
- * The user can change the measurement intervals for the DHT sensor and the rain sensor.
- * 
- * The user can change the sleep mode timeout.
- * 
- * The user can exit the menu.
- * 
- */
-void changeSettings(){
-  printf("Which setting do you want to change?\n");
-  printf("1. Temperature\n");
-  printf("2. Humidity\n");
-  printf("3. Measurement Interval\n");
-  printf("4. Sleep Mode\n");
-  printf("5. Exit\n");
-
-  int choice = 0;
-  scanf("%d", &choice);
-
-  switch(choice){
-    case 1:
-      changeTempSettings();
-      break;
-    case 2:
-      changeHumiditySettings();
-      break;
-    case 3:
-      changeMeasurementInterval();
-      break;
-    case 4:
-      changeSleepMode();
-      break;
-    case 5:
-      break;
-    default:
-      printf("Invalid choice\n");
-      break;
-  }
+void restartESP32() {
+  Serial.println("Restarting ESP32...");
+  ESP.restart();
 }
 
 /* checks if enough time has passed since last occurance, returns true/false*/
@@ -1102,27 +1012,49 @@ char get_key() {
 /* Draw Graph (copied function, verify it works) 
 https://forums.adafruit.com/viewtopic.php?t=110757 */
 void drawGraph() {
+
+  // clear display
+  display.clearDisplay();
+
+  /* draw graph */
+  // Vertical line on the left
   for (uint8_t i = 1; i < 4; i++) {
-    display.drawPixel(6, SCREEN_HEIGHT - SCREEN_HEIGHT / 4 * i, SH110X_WHITE);
+    display.drawPixel(6, SCREEN_HEIGHT - (SCREEN_HEIGHT / 4) * i, SSD1306_WHITE);
   }
-  display.drawPixel(27, 62, SH110X_WHITE); 
-  display.drawPixel(47, 62, SH110X_WHITE); 
-  display.drawPixel(67, 62, SH110X_WHITE); 
-  display.drawPixel(87, 62, SH110X_WHITE); 
-  display.drawPixel(107, 62, SH110X_WHITE);
-  for (uint8_t i = 7; i < SCREEN_WIDTH; i = i + 5) {
-    display.drawPixel(i, SCREEN_HEIGHT - SCREEN_HEIGHT / 4, SH110X_WHITE); 
+
+
+  display.drawPixel(27, 62, SSD1306_WHITE); 
+  display.drawPixel(47, 62, SSD1306_WHITE); 
+  display.drawPixel(67, 62, SSD1306_WHITE); 
+  display.drawPixel(87, 62, SSD1306_WHITE); 
+  display.drawPixel(107, 62, SSD1306_WHITE);
+
+  // Horizontal line on the bottom
+  for (uint8_t i = 7; i < SSD1306_WHITE; i = i + 5) {
+    display.drawPixel(i, SCREEN_HEIGHT - SCREEN_HEIGHT / 4, SSD1306_WHITE); 
   }
-  display.drawFastVLine(7, 0, 63, SH110X_WHITE);
-  display.drawFastHLine(7, 63, 120, SH110X_WHITE);
+
+  display.drawFastVLine(7, 0, 63, SSD1306_WHITE);
+  display.drawFastHLine(7, 63, 120, SSD1306_WHITE);
+
+  // draw buffer
+  display.display();
 }
 
 /* Draw Temp Graph (copied function, verify it works) 
 https://forums.adafruit.com/viewtopic.php?t=110757 */
 void drawTempGraph() {
 
-  display.clearDisplay();
+  // Draw graph
   drawGraph();
+
+  // hold for 5 seconds
+  delay(5000);
+
+  // clear display
+  display.clearDisplay();
+
+  // draw text
   display.setCursor(9, 0);
   display.print(F("Temp:"));
   display.print((float) temperature, 1);
@@ -1135,8 +1067,12 @@ void drawTempGraph() {
   display.write(24); 
   display.setCursor(0, 8);
   display.print('T'); 
-  
 
+  // Draw the readings
+  display.display();
+
+  // hold for 5 seconds
+  delay(5000);
 }
 
 // ToggleController
@@ -1373,7 +1309,7 @@ void handleDisplay(){
     Serial.println("Displaying measurements:");
 
     //Send measurements to display
-    //drawTempGraph();
+    drawTempGraph();
   }
 
   
@@ -1412,6 +1348,7 @@ void handleLEDs(){
 }
 
 
+
 /**********
  * Events *
  *************************************************
@@ -1435,9 +1372,12 @@ void updateToggleState(String instance, bool state) {
   weatherMonitor.sendToggleStateEvent(instance, state);
 }
 
+
+
 /********* 
  * Setup *
  *********/
+
 
 void setupSinricPro() {
   // ToggleController
@@ -1498,7 +1438,8 @@ void setupDisplay() {
 
   //display.setRotation(1);
   display.setTextSize(1);
-  display.setTextColor(SH110X_WHITE);
+  //display.setFont(&FreeSerif9pt7b); //TODO: Find a smaller font (currently default is best)
+  display.setTextColor(SSD1306_WHITE);
   display.setCursor(0,0);
 
 }
@@ -1549,6 +1490,8 @@ void setupDisplay() {
  * 
  */
 void setupMenu() {
+  // Create menus
+
   Menu* start_menu = new Menu{
     "Start",
     {"Window", "Alarm", "Sleep", "Restart", "Exit"},
@@ -1578,7 +1521,7 @@ void setupMenu() {
 
   Menu* main_menu = new Menu{
     "Main Menu",
-    {"Start", "Settings", "Test", "Shutdown"},
+    {"Start Monitor", "Settings", "Test systems", "Shutdown"},
     0,
     nullptr,
     {start_menu, settings_menu, test_menu, nullptr},
@@ -1587,7 +1530,7 @@ void setupMenu() {
 
   Menu* TempMenu = new Menu{
     "Temperature",
-    {"Use Target Temperature", "Use Temperature Limits", "Exit"},
+    {"Use Target", "Use Limits", "Back"},
     0,
     nullptr,
     {},
@@ -1596,7 +1539,7 @@ void setupMenu() {
 
   Menu* targetTempMenu = new Menu{
     "Target Temperature",
-    {"Target Temperature", "Temperature Range", "Exit"},
+    {"Target Temperature", "Allowed Range", "Back"},
     0,
     nullptr,
     {},
@@ -1605,7 +1548,7 @@ void setupMenu() {
 
   Menu* tempLimitsMenu = new Menu{
     "Temperature Limits",
-    {"Lower Temperature", "Upper Temperature", "Exit"},
+    {"Lower Limit", "Upper Limit", "Back"},
     0,
     nullptr,
     {},
@@ -1614,7 +1557,7 @@ void setupMenu() {
 
   Menu* humidityMenu = new Menu{
     "Humidity",
-    {"Use Target Humidity", "Use Humidity Range", "Exit"},
+    {"Use Target", "Use Limits", "Back"},
     0,
     nullptr,
     {},
@@ -1623,7 +1566,7 @@ void setupMenu() {
 
   Menu* targetHumidityMenu = new Menu{
     "Target Humidity",
-    {"Target Humidity", "Humidity Range", "Exit"},
+    {"Target Humidity", "Allowed Range", "Back"},
     0,
     nullptr,
     {},
@@ -1632,7 +1575,7 @@ void setupMenu() {
 
   Menu* humidityLimitsMenu = new Menu{
     "Humidity Limits",
-    {"Lower Humidity", "Upper Humidity", "Exit"},
+    {"Lower Limit", "Upper Limit", "Back"},
     0,
     nullptr,
     {},
@@ -1641,7 +1584,7 @@ void setupMenu() {
   
   Menu* IntervalMenu = new Menu{
     "Measurement Interval",
-    {"DHT Interval", "Rain Interval", "Monitor Interval", "Exit"},
+    {"DHT Interval", "Rain Interval", "Monitor Interval", "Back"},
     0,
     nullptr,
     {},
@@ -1657,7 +1600,7 @@ void setupMenu() {
   addFunction(start_menu, handleStepper);
   addFunction(start_menu, handleAlarm);
   addFunction(start_menu, handleSleep);
-  addFunction(start_menu, nullptr);  //TODO: Add restart function
+  addFunction(start_menu, restartESP32);  //TODO: Add restart function
   addFunction(start_menu, back);
 
   // settings menu
@@ -1666,10 +1609,10 @@ void setupMenu() {
   addChildMenu(settings_menu, humidityMenu);
   addChildMenu(settings_menu, IntervalMenu);
 
-  addFunction(settings_menu, nullptr);
-  addFunction(settings_menu, nullptr);
-  addFunction(settings_menu, nullptr);
-  addFunction(settings_menu, changeSleepMode);
+  addFunction(settings_menu, nullptr);  // Move to temperature menu
+  addFunction(settings_menu, nullptr);  // Move to humidity menu
+  addFunction(settings_menu, nullptr);  // Move to measurement interval menu
+  addFunction(settings_menu, nullptr);  // TODO: Implement sleep mode
   addFunction(settings_menu, back);
 
   // test menu
@@ -1682,7 +1625,9 @@ void setupMenu() {
   addFunction(test_menu, testLEDs);
   addFunction(test_menu, back);
 
+
   /* 2nd level menus */
+
   // temperature menu
   setParentMenu(settings_menu, *TempMenu);
   addChildMenu(TempMenu, targetTempMenu);
@@ -1706,7 +1651,9 @@ void setupMenu() {
   addFunction(IntervalMenu, updateMonitorTimeout);
   addFunction(IntervalMenu, back);
 
+
   /* 3rd level menus */
+
   // target temperature menu
   setParentMenu(settings_menu, *targetTempMenu);  // Go back to settings menu
   addFunction(targetTempMenu, updateTargetTemp); // Set target temperature function
@@ -1730,6 +1677,7 @@ void setupMenu() {
   addFunction(humidityLimitsMenu, updateLowerHumidity); // Set lower humidity function
   addFunction(humidityLimitsMenu, updateUpperHumidity); // Set upper humidity function
   addFunction(humidityLimitsMenu, back);
+
 
   // Sanity check Menus
   std::vector<Menu*> menus = {main_menu, start_menu, settings_menu, test_menu, 
@@ -1795,6 +1743,8 @@ void setup() {
   delay(5000);
   printMenuAndMessage(current_menu, "Hello, world!");  // 5 is the number of items, 0 is the menu index
 }
+
+
 
 /********* 
  * Test Functions *
@@ -2082,6 +2032,11 @@ void printWifiStatus() {
 }
 
 
+
+/*********
+ * Utils *    (Or unassigned functions)
+ *********/
+
 /**
  * @brief Simulates rain occuring in a random interval between 1 and 5 minutes
  * 
@@ -2262,8 +2217,7 @@ void printMenuAndMessage(Menu* menu, const String& message) {
   display.setTextColor(WHITE);
 
   // Determine the top visible menu item
-  int topItem = max( 0, menu->currentSelection - 3);  // Adjust 3 to the number of items you can display at once
-  //Serial.println(topItem);
+  int topItem = max( 0, menu->currentSelection - 3);  // 3 is the number of items you can display at once
 
   // Print the menu on the left side
   display.setCursor(0, 0);
@@ -2276,6 +2230,31 @@ void printMenuAndMessage(Menu* menu, const String& message) {
     }
     display.println(menu->choices[i]);
   }
+
+  // Print the message on the right side
+  int currentLineStart = SCREEN_WIDTH / 2;  // Adjust as needed
+  String word = "";
+  for (char c : message) {
+    if (c == ' ' || c == '\n') {
+      int wordWidth = word.length() * 6;  // Approximate width of a character is 6 pixels
+      if (display.getCursorX() + wordWidth > SCREEN_WIDTH) {
+        display.setCursor(currentLineStart, display.getCursorY() + 10);  // Move to the next line
+      }
+      display.print(word + " ");
+      word = "";
+    } else {
+      word += c;
+    }
+  }
+  display.println(word);  // Print the last word
+
+  display.display();
+}
+
+void printUserMessage(const String& message) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
 
   // Print the message on the right side
   int currentLineStart = SCREEN_WIDTH / 2;  // Adjust as needed

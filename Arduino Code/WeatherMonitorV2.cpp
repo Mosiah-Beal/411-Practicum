@@ -175,6 +175,8 @@
 #include <Adafruit_SSD1306.h>
 
 
+
+
 /***********
  * Defines *
  **********/
@@ -186,6 +188,32 @@
 // The pins for I2C are defined by the Wire-library. 
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+
+// Test Display definitions
+#define NUMFLAKES     10 // Number of snowflakes in the animation example
+#define LOGO_HEIGHT   16
+#define LOGO_WIDTH    16
+
+#define XPOS   0 // Indexes into the 'icons' array in testanimate function below
+#define YPOS   1
+#define DELTAY 2
+static const unsigned char PROGMEM logo_bmp[] =
+{ 0b00000000, 0b11000000,
+  0b00000001, 0b11000000,
+  0b00000001, 0b11000000,
+  0b00000011, 0b11100000,
+  0b11110011, 0b11100000,
+  0b11111110, 0b11111000,
+  0b01111110, 0b11111111,
+  0b00110011, 0b10011111,
+  0b00011111, 0b11111100,
+  0b00001101, 0b01110000,
+  0b00011011, 0b10100000,
+  0b00111111, 0b11100000,
+  0b00111111, 0b11110000,
+  0b01111100, 0b11110000,
+  0b01110000, 0b01110000,
+  0b00000000, 0b00110000 };
 
 /* Keypad Definitions */
 #define ROWS 4
@@ -218,6 +246,7 @@ char keymap[ROWS][COLS] = {
 
 /* Serial Communication rate */
 #define BAUD_RATE  115200
+
 
 
 /*************
@@ -281,6 +310,7 @@ struct MonitorState {
   bool Good_Temp;     //Temperature is within limits
   bool Good_Humidity; //Humidity is within limits
   bool Rain;          //Rain sensor is wet
+  bool Display_Menu;  //Display menu on OLED display (supressed when monitoring)
 
   //User settings
   bool Use_Target_Temp;     //Use target temperature
@@ -294,12 +324,12 @@ struct MonitorState {
 };
 
 //Start with both I2C devices assumed to be missing, DHT and rain sensor allowed to take readings, stepper motor released,
-//window closed, unsafe temperature, unsafe humidity, not currently raining, 
+//window closed, unsafe temperature, unsafe humidity, not currently raining, and menu displayed
 //Using temperature limits, Using humidity limits, window is controlled manually, alarm off, and sleep off
 //use sinric pro
 static MonitorState Monitor = {
   false, false, true, true, false,
-  false, false, false, false,
+  false, false, false, false, true,
   false, false, true, false, false,
   true};
 
@@ -356,10 +386,11 @@ static userSettings settings = {
  * 
  *    Start
  *    -------------
+ *    Monitor: (display current temperature and humidity until key is pressed)
  *    Window : Open/Close
  *    Alarm  : On/Off
  *    Sleep  : Go to sleep
- *    Restart: Restart ESP32 TODO: refresh on how software
+ *    Restart: Restart ESP32
  *    Exit   : Exit to main menu
  * 
  * 
@@ -418,6 +449,7 @@ void handleAlarm(void);
 void handleSleep(void);
 void handleLEDs(void);
 void printWifiStatus(void);
+void watchSensors(void);
 
 
 // Menu construction functions
@@ -489,13 +521,41 @@ void testStepper(void);
 void testAlarm(void);
 void testLEDs(void);
 
-// Oled test functions
-void testdrawstyles(void);
-void printMenuAndMessage(Menu* menu, const String& message);
-
 // Simulated input functions
 void simulateTemperature(void);
 void simulateRain(void);
+
+// Oled display functions
+void testdrawstyles(void);
+void printMenu(Menu* menu);
+void printUserMessage(String message);
+
+void clear_line(int line);
+void clear_menu_lines(void);
+
+void displayMessage(String message);
+void print_long_message(String message);
+
+
+// Mega draw test functions
+void megaDrawTest(void);
+void testdrawline(void);
+void testdrawrect(void);
+void testfillrect(void);
+void testdrawcircle(void);
+void testfillcircle(void);
+void testdrawroundrect(void);
+void testfillroundrect(void);
+void testdrawtriangle(void);
+void testfilltriangle(void);
+void testdrawchar(void);
+void testdrawstyles(void);
+void testscrolltext(void);
+void testdrawbitmap(void);
+void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h);
+
+
+
 
 
 
@@ -516,6 +576,9 @@ wl_status_t lastWifiStatus = WL_IDLE_STATUS;
 // Global pointer to the current menu
 Menu* current_menu = new Menu; // Start with an empty menu
 
+// Global string to hold messages to be displayed on the OLED display
+String userMessage = "";
+
 // ToggleController
 std::map<String, bool> globalToggleStates;
 
@@ -534,6 +597,8 @@ float humidity;                               // current humidity
  *   Timers  *
  * ***********/
 
+/* Handle timers*/
+
 /* DHT */
 unsigned long DHT_previous_millis = 0;                      // will store last time DHT was checked
 const long DHT_sample_interval = settings.DHT_interval;    // interval at which to sample (in milliseconds)
@@ -542,15 +607,30 @@ const long DHT_sample_interval = settings.DHT_interval;    // interval at which 
 unsigned long LM393_previous_millis = 0;                      // will store last time rain sensor was checked
 const long LM393_sample_interval = settings.rain_interval;    // interval at which to sample (in milliseconds)
 
-/* Simulated Menu */
+/* Serial Menu */
 unsigned long menu_previous_millis = 0;                           // will store last time menu was opened/closed
 const long menu_refresh_interval = 0.1 * 1000;                      // interval at which to open/close menu (in milliseconds)
 
-/* Simulated Test */
+/* Display */
+unsigned long display_previous_millis = 0;                           // will store last time display was updated
+const long display_refresh_interval = 0.1 * 1000;                      // interval at which to update display (in milliseconds)
+
+/* Alarm */
+unsigned long alarm_previous_millis = 0;                            // will store last time alarm was triggered
+const long alarm_refresh_interval = 5 * 1000;                       // interval at which to trigger alarm (in milliseconds)
+const long alarm_tone_length = 10;                                        // length of alarm tone (in milliseconds)
+
+/* Test timers */
 
 /* Unassigned test */
 unsigned long test_previous_millis = 0;                           // will store last time test was run
 const long test_refresh_interval = 10 * 1000;                      // interval at which to run test (in milliseconds)
+
+/* Alarm */
+unsigned long alarm_previous_millis = 0;                            // will store last time alarm was triggered
+const long alarm_refresh_interval = 5 * 1000;                       // interval at which to trigger alarm (in milliseconds)
+const long tone_length = 10;                                        // length of alarm tone (in milliseconds)
+
 
 
 /*************
@@ -563,45 +643,51 @@ void loop() {
   /* Check if WiFi status has changed */
   printWifiStatus();
 
-    
+  
+
+  // Get reading from Rain sensor if it is time
   if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
-    //(simulatedRain) ? simulateRain() : testRainSensor();
+    testRainSensor();
   }
 
   if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
-    //(simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
+    (simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
   }
 
-  /* Check for input from the keypad */
-  if (Monitor.Keypad_on){
-    //Serial.println("Keypad on");
-    handleKeypad();
+  // Display the current Sensor readings
+  if (Monitor.Display_on){
+    handleDisplay();
+  }
+  
+  /* Check if menu should be displayed */
+  if (Monitor.Display_Menu){
+    // If keypad is connected, use it to navigate the menu, otherwise use the Serial Monitor
+    (Monitor.Keypad_on) ? handleKeypad() : testMenu();
+ 
   }
   else{
-    // No keypad connected, check if Serial Monitor input is available
-    testMenu();
-    printMenuAndMessage(current_menu, "");
+    watchSensors();
   }
 
   /* Check for input from the rain sensor */
   if (Monitor.RainSensor_on){
-    handleRainSensor();
+    //handleRainSensor();
   }
 
   /* Measure temperature and humidity. */
   if (Monitor.DHT_on) {
     if (deviceIsOn) { // Sinric Pro device is turned on, use their handler
-      handleTemperaturesensor();
+      //handleTemperaturesensor();
     }
     else if (check_interval(&test_previous_millis, test_refresh_interval)) { // Sinric Pro device is turned off, use the DHT handler
-      testTemperatureSensor();
+      //testTemperatureSensor();
     }
     
   }
 
   /* Display temperature and humidity on the display */
   if (Monitor.Display_on){
-    handleDisplay();
+    //handleDisplay();
   }
 
   /* Check if window needs to be opened or closed */
@@ -692,6 +778,8 @@ void selectOption(Menu*& current_menu) {
     else {
       Serial.println("No function or submenu associated with current selection");
     }
+  
+  
   }
 
 }
@@ -739,9 +827,17 @@ void back() {
  */
 template <typename UserSetting>
 void updateUserSettings(UserSetting& setting, bool isTime) {
-  // Print the current setting
-  Serial.print("Current setting: ");
-  Serial.println(setting);
+  
+  if(Monitor.Display_on){
+    // Display the current setting
+    String message = "Current setting: " + String(setting);
+    //printUserMessage(message);
+  }
+  else{
+    // Print the current setting
+    Serial.print("Current setting: ");
+    Serial.println(setting);
+  }
 
   String input = "";
 
@@ -789,10 +885,19 @@ void updateUserSettings(UserSetting& setting, bool isTime) {
  */
 void updateTargetTemp() {
   // Print the current target temperature
-  Serial.print("Current target temperature: ");
-  Serial.println(settings.targetTemperature);
+  String message = "Current target temperature: " + String(settings.targetTemperature);
+  print_long_message(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the target temperature
+
+  message = "Do you want to change the target temperature?\n";
+  message += "(1. Yes / 2. No)\n";
+
+  print_long_message(message);
+
   Serial.println("Do you want to change the target temperature?");
   Serial.println("1. Yes");
   Serial.println("2. No");
@@ -945,6 +1050,7 @@ void restartESP32() {
   ESP.restart();
 }
 
+
 /* checks if enough time has passed since last occurance, returns true/false*/
 bool check_interval(unsigned long* previousMillis, long interval) {
   unsigned long currentMillis = millis();
@@ -1090,6 +1196,30 @@ bool onToggleState(const String& deviceId, const String& instance, bool &state) 
 
 //TODO: Add handlers for other devices, rewrite handlers as needed to accomodate function calls properly
 //     Better follow the flowchart of events/scheduling for standard operation
+
+/* Watch Sensors() */
+void watchSensors() {
+// Constantly looks for keypad/Serial input, returns to main menu on key press
+// Suppresses menu function calls
+
+// Check if enough time has passed since the last key press
+if (check_interval(&menu_previous_millis, menu_refresh_interval)) {
+  // Check if a key has been pressed
+  char key = get_key();
+  if (key != 0) {
+    // A key has been pressed, return to main menu
+    displayMessage("Returning to main menu");
+    Monitor.Display_Menu = true;
+    return;
+
+  }
+}
+
+// Otherwise, display the current temperature and humidity
+String message = "Temperature: " + String(temperature) + "C\n";
+message += "Humidity: " + String(humidity) + "%";
+print_long_message(message);
+}
 
 /* handleTemperatatureSensor()
  * - Checks if Temperaturesensor is turned on
@@ -1282,6 +1412,7 @@ void handleKeypad(){
   // Print the current menu status to the serial monitor
   if (updateDisplay) {
     printMenuStatus(current_menu);
+    printMenu(current_menu);
     updateDisplay = false;
   }
 
@@ -1334,7 +1465,32 @@ void handleStepper(){
 
 /* handleAlarm() */
 void handleAlarm(){
-  //TODO: Add alarm functionality
+  if(get_key() == '0'){
+    Monitor.Alarm = false;
+    return;
+  }
+  
+  if (millis() - previousMillis >= interval) {
+    // Save the last time a tone was played
+    previousMillis = millis();
+
+    // Play a tone on the buzzer
+    tone(buzzerPin, frequency);
+
+    // Update the frequency
+    if (increasing) {
+      frequency++;
+      if (frequency == 800) {
+        increasing = false;
+      }
+    } else {
+      frequency--;
+      if (frequency == 400) {
+        increasing = true;
+      }
+    }
+  }
+    
 }
 
 /* handleSleep() */
@@ -1377,7 +1533,6 @@ void updateToggleState(String instance, bool state) {
 /********* 
  * Setup *
  *********/
-
 
 void setupSinricPro() {
   // ToggleController
@@ -1439,7 +1594,7 @@ void setupDisplay() {
   //display.setRotation(1);
   display.setTextSize(1);
   //display.setFont(&FreeSerif9pt7b); //TODO: Find a smaller font (currently default is best)
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(WHITE, BLACK);
   display.setCursor(0,0);
 
 }
@@ -1494,7 +1649,7 @@ void setupMenu() {
 
   Menu* start_menu = new Menu{
     "Start",
-    {"Window", "Alarm", "Sleep", "Restart", "Exit"},
+    {"Monitor", "Window", "Alarm", "Sleep", "Restart", "Exit"},
     0,
     nullptr,
     {},
@@ -1512,7 +1667,7 @@ void setupMenu() {
 
   Menu* test_menu = new Menu{
     "Test",
-    {"Keypad", "Display", "Rain Sensor", "Stepper Motor", "Alarm", "LEDs", "Exit"},
+    {"Keypad", "Display", "DHT", "Rain Sensor", "Stepper Motor", "Alarm", "LEDs", "Exit"},
     0,
     nullptr,
     {},
@@ -1597,6 +1752,7 @@ void setupMenu() {
 
   // start menu
   setParentMenu(main_menu, *start_menu);
+  addFunction(start_menu, watchSensors);
   addFunction(start_menu, handleStepper);
   addFunction(start_menu, handleAlarm);
   addFunction(start_menu, handleSleep);
@@ -1619,6 +1775,7 @@ void setupMenu() {
   setParentMenu(main_menu, *test_menu);
   addFunction(test_menu, testKeypad);
   addFunction(test_menu, testDisplay);
+  addFunction(test_menu, testTemperatureSensor);
   addFunction(test_menu, testRainSensor);
   addFunction(test_menu, testStepper);
   addFunction(test_menu, testAlarm);
@@ -1741,7 +1898,7 @@ void setup() {
   //handleTemperaturesensor(); // check temperature sensor
 
   delay(5000);
-  printMenuAndMessage(current_menu, "Hello, world!");  // 5 is the number of items, 0 is the menu index
+  printMenu(current_menu);  // 5 is the number of items, 0 is the menu index
 }
 
 
@@ -1751,46 +1908,78 @@ void setup() {
  *********/
 
 void testKeypad(){  
-  if (keypad.available() > 0) {
-    //  datasheet page 15 - Table 1
-    int k = keypad.getEvent();
-    bool pressed = k & 0x80;
-    k &= 0x7F;
-    k--;
-    uint8_t row = k / 10;
-    uint8_t col = k % 10;
 
-    if (pressed)
-      Serial.print("PRESS\tR: ");
-    else
-      Serial.print("RELEASE\tR: ");
-    Serial.print(row);
-    Serial.print("\tC: ");
-    Serial.print(col);
-    Serial.print(" - ");
-    Serial.print(keymap[col][row]);
-    Serial.println();
+  if(Monitor.Keypad_on == false){
+    displayMessage("Keypad not initialized!");
+    return;
   }
+
+  // print the key pressed until *#* is pressed
+  char last3keys[3] = {0, 0, 0};
+  while(last3keys[0] != '*' || last3keys[1] != '#' || last3keys[2] != '*') {
+    
+    if (keypad.available() > 0) {
+      //  datasheet page 15 - Table 1
+      int k = keypad.getEvent();
+      bool pressed = k & 0x80;
+      k &= 0x7F;
+      k--;
+      uint8_t row = k / 10;
+      uint8_t col = k % 10;
+
+      if (pressed)
+        Serial.print("PRESS\tR: ");
+      else
+        Serial.print("RELEASE\tR: ");
+      Serial.print(row);
+      Serial.print("\tC: ");
+      Serial.print(col);
+      Serial.print(" - ");
+      Serial.print(keymap[col][row]);
+      Serial.println();
+
+      // Store the last 3 keys released
+      if (!pressed) {
+        last3keys[0] = last3keys[1];
+        last3keys[1] = last3keys[2];
+        last3keys[2] = keymap[col][row];
+      }
+    }//end if keypad.available()
+  }//end while
+  
 }
 
 void testDisplay(){
+  if(Monitor.Display_on == false){
+    Serial.println("Display not initialized!");
+    return;
+  }
+
   display.clearDisplay();
   display.setCursor(0, 0);
   display.print("Hello World!");
+  // Test components if connected (DHT and Rain)
   yield();
   display.display();
   
   // hold for 5 seconds
   delay(5000);
 
-  testdrawstyles();
+  megaDrawTest();
 }
 
 void testRainSensor(){
   
   int rainDigitalVal = digitalRead(rainDigital);
-  Serial.print("Digitial reading: ");
-  Serial.println(rainDigitalVal);
+
+  String message = "Rain Sensor: ";
+  if (rainDigitalVal) {
+    message += "Dry";
+  }
+  else {
+    message += "Wet";
+  }
+  displayMessage(message);
 }
 
 void testTemperatureSensor(){
@@ -1807,7 +1996,15 @@ void testTemperatureSensor(){
   temperature = dht.getTemperature();          // get actual temperature in °C
   humidity = dht.getHumidity();                // get actual humidity
   
-  Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
+
+  String message = "Temp: " + String(temperature) + "C\n";
+  displayMessage(message);
+  
+  delay(3000);
+  message = "Hum: " + String(humidity) + "%";
+  displayMessage(message);
+
+  //Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
   //Serial.print("Temperature: ");
   //Serial.print(temperature);
   //Serial.print(" Humidity: ");
@@ -1833,9 +2030,22 @@ void testStepper(){
 void testAlarm(){
   //TODO: Add alarm functionality
   Serial.println("Triggering alarm for 5 seconds");
-  digitalWrite(ALARM_PIN, HIGH);
-  delay(5000);
-  digitalWrite(ALARM_PIN, LOW);
+  // Increase frequency
+
+  alarm_previous_millis = millis();
+  while (millis() - alarm_previous_millis < 5000){
+    for (int i = 400; i < 800; i++) {
+      tone(ALARM_PIN, i);
+      delay(tone_length); // Short delay between tones
+    }
+    
+    // Decrease frequency
+    for (int i = 800; i > 400; i--) {
+      tone(ALARM_PIN, i);
+      delay(tone_length); // Short delay between tones
+    }
+  }
+  noTone(ALARM_PIN);
   Serial.println("Alarm off");
   
 }
@@ -2004,9 +2214,13 @@ void testMenu(){
   // Check if the display needs to be updated
   if(updateDisplay){
     // Print the current menu
-    //printMenu(*current_menu);
-    printMenuStatus(current_menu);
+    if(Monitor.Display_on){
+      printMenu(current_menu);
+    }
 
+    if(!Monitor.Display_on || Debug){
+      printMenuStatus(current_menu);
+    }
     updateDisplay = false;
   }
   
@@ -2158,26 +2372,6 @@ void printMenu(Menu menu) {
   }
 }
 
-void testdrawstyles(void) {
-  display.clearDisplay();
-
-  display.setTextSize(1);             // Normal 1:1 pixel scale
-  display.setTextColor(SSD1306_WHITE);        // Draw white text
-  display.setCursor(0,0);             // Start at top-left corner
-  display.println(F("Hello, world!"));
-
-  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); // Draw 'inverse' text
-  display.println(3.141592);
-
-  display.setTextSize(2);             // Draw 2X-scale text
-  display.setTextColor(SSD1306_WHITE);
-  display.print(F("0x")); display.println(0xDEADBEEF, HEX);
-
-  display.display();
-  delay(2000);
-}
-
-
 
 /****************
  * Loop Rewrite *
@@ -2211,19 +2405,19 @@ void loop2() {
 }
 
 
-void printMenuAndMessage(Menu* menu, const String& message) {
-  display.clearDisplay();
+void printMenu(Menu* menu) {
+  clear_menu_lines();
   display.setTextSize(1);
-  display.setTextColor(WHITE);
+  display.setTextColor(WHITE, BLACK); 
 
   // Determine the top visible menu item
-  int topItem = max( 0, menu->currentSelection - 3);  // 3 is the number of items you can display at once
+  int topItem = max( 0, menu->currentSelection - 1);  // show one item above and below the current selection
 
   // Print the menu on the left side
   display.setCursor(0, 0);
   
   // Print the menu options below the title
-  for (int i = topItem; i < min(topItem + 4, (int) menu->choices.size()); i++) {  // Adjust 4 to the number of items you can display at once
+  for (int i = topItem; i < min(topItem + 3, (int) menu->choices.size()); i++) {  // Display 3 items, leave 4th line for messages
     if (i == menu->currentSelection) {
       // Highlight the selected option
       display.print("> ");
@@ -2231,47 +2425,531 @@ void printMenuAndMessage(Menu* menu, const String& message) {
     display.println(menu->choices[i]);
   }
 
-  // Print the message on the right side
-  int currentLineStart = SCREEN_WIDTH / 2;  // Adjust as needed
-  String word = "";
-  for (char c : message) {
-    if (c == ' ' || c == '\n') {
-      int wordWidth = word.length() * 6;  // Approximate width of a character is 6 pixels
-      if (display.getCursorX() + wordWidth > SCREEN_WIDTH) {
-        display.setCursor(currentLineStart, display.getCursorY() + 10);  // Move to the next line
-      }
-      display.print(word + " ");
-      word = "";
-    } else {
-      word += c;
-    }
-  }
-  display.println(word);  // Print the last word
+  // Print the message on the 4th line
+  //userMessage = "Hello World!";
+  //displayuserMessage(userMessage);
 
   display.display();
 }
 
-void printUserMessage(const String& message) {
-  display.clearDisplay();
+void printUserMessage(const String message) {
+  clear_line(4);
   display.setTextSize(1);
-  display.setTextColor(WHITE);
+  display.setTextColor(WHITE, BLACK);
 
-  // Print the message on the right side
-  int currentLineStart = SCREEN_WIDTH / 2;  // Adjust as needed
+  // Record the message to the serial monitor
+  Serial.print("Message: ");
+  Serial.println(message);
+
+  // Print the message on the 4th line
+  display.setCursor(0, 24);  // 24 is the y coordinate of the 4th line (75% of 32)
+  
+  // break the message into words so it fits on the screen, check if it fits on the 4th line
+  // Print as much of the message as possible on the 4th line, then wait 3 seconds before processing the rest
+  // characters are 5 pixels wide + 1 pixel space between characters
   String word = "";
-  for (char c : message) {
-    if (c == ' ' || c == '\n') {
-      int wordWidth = word.length() * 6;  // Approximate width of a character is 6 pixels
-      if (display.getCursorX() + wordWidth > SCREEN_WIDTH) {
-        display.setCursor(currentLineStart, display.getCursorY() + 10);  // Move to the next line
+  int wordWidth = 0;
+  int x = 0;
+  for (int i = 0; i < message.length(); i++) {
+    char c = message.charAt(i);
+    if (c == ' ') {
+      // Print the word if it fits on the 4th line
+      if (x + wordWidth <= 128) {
+        display.print(word);
+        display.print(" ");
+        x += wordWidth + 6; // 6 is the width of a space
+      } else {
+        // The word doesn't fit on the 4th line, so print the message so far and wait 3 seconds
+        display.display();
+        delay(3000);
+        
+        // Clear the display and reset the cursor
+        clear_line(4);
+        display.setCursor(0, 24);
+        x = 0;
       }
-      display.print(word + " ");
+
+      // Reset the word
       word = "";
+      wordWidth = 0;
     } else {
+      // Add the character to the word
       word += c;
+      wordWidth += 6;
     }
   }
-  display.println(word);  // Print the last word
+  
+  //Print the last word if it fits on the 4th line
+if (word.length() > 0) {
+  if (x + wordWidth > 128) {
+    // The word doesn't fit on the line, so print the message so far and wait 3 seconds
+    display.display();
+    delay(3000);
+    
+    // Clear the display and reset the cursor
+    clear_line(4);
+    display.setCursor(0, 24);
+    x = 0;
+  }
 
+  // Print the last word
+  display.print(word);
+}
+
+// Show the last word
+display.display();
+
+
+}
+
+void clear_line(int line) {
+  switch(line) {
+    case 1:
+      display.setCursor(0, 0);
+      break;
+    case 2:
+      display.setCursor(0, 8);
+      break;
+    case 3:
+      display.setCursor(0, 16);
+      break;
+    case 4:
+      display.setCursor(0, 24);
+      break;
+    default:
+      Serial.println("Invalid line number");
+      break;
+  }
+  for (int i = 0; i < SCREEN_WIDTH / 6; i++) { // display width of 128 pixels and character width of 6 pixels
+    display.print(' ');
+  }
   display.display();
 }
+
+void clear_menu_lines() {
+  clear_line(1);
+  clear_line(2);
+  clear_line(3);
+}
+
+
+void displayMessage(String message) {
+  // determine if message should be passed to Serial Monitor or OLED display (or both)
+  if (Monitor.Display_on) {
+    // Display message on OLED display
+    printUserMessage(message);  //TODO: Add message to queue/break up message into multiple lines
+    // if message > SCREEN_WIDTH / 6, set flag to scroll message
+  }
+  
+  if(!Monitor.Display_on || Debug){
+    // Display message on Serial Monitor
+    Serial.println(message);
+  }
+
+}
+
+void print_long_message(String message) {
+  // overwrites the current menu with a long message
+  Serial.println("Printing long message");
+  Serial.println(message);
+
+  // clear the display
+  display.clearDisplay();
+
+  // Calculate the number of lines needed to display the message
+  int NumCharsPerLine = SCREEN_WIDTH / 10; // 6 is the width of a character
+  int numLines = ceil(message.length() / NumCharsPerLine); // 6 is the width of a character
+
+  Serial.print("Number of lines: ");
+  Serial.println(numLines);
+  
+  int start = 0;  // start of the substring to print
+  int end = 0;    // end of the substring to print
+  int temp_end = 0; // temporary placeholder for the end of the substring to print
+
+  // if the message is too long to fit on the screen, print the first part of the message and wait 3 seconds
+  // When printing substrings, make sure to split on newlines and on the last space before the end of the line
+  for(int i = 0; i < numLines; i++) {
+    // Calculate the end of the substring to print assuming best case scenario
+    end = min(start + NumCharsPerLine, (int) message.length());
+    
+    // Check if the end of the substring needs to be adjusted
+    if(end < message.length()) {
+      // If there is a newline in the substring, move the end to the newline
+      temp_end = message.indexOf('\n', end);
+      if (temp_end != -1) {
+        // move the end to the newline, removing the newline character
+        end = temp_end-1;
+      }
+
+      // Otherwise, if the end of the substring is in the middle of a word,
+      //move the end to the last space before the end of the line
+      else if(message.charAt(end) != ' ') {
+        temp_end = message.lastIndexOf(' ', end);
+        if(temp_end != -1) {
+          end = temp_end;
+        }
+      }
+    }// end if(end < message.length())
+
+    // Serial.print("Start: ");
+    // Serial.print(start);
+    // Serial.print(" End: ");
+    // Serial.println(end);
+
+    // Print the substring
+    //display.setCursor(0, (i % 4) * 8);  // 8 is the height of a character
+    display.println(message.substring(start, end));
+    Serial.println(message.substring(start, end));
+    display.display();
+
+    if(i % 4 == 3) {
+      // Wait 3 before clearing the display
+      delay(3000);
+      display.clearDisplay();
+      display.setCursor(0, 0);
+    }
+
+    // Update the start of the substring to print
+    start = end;
+  }
+   
+
+  // Make sure the last part of the message is printed
+  display.display();
+}
+
+
+
+/******************
+ * Graphics tests *
+ *****************/
+
+void megaDrawTest() {
+  testdrawline();      // Draw many lines
+
+  testdrawrect();      // Draw rectangles (outlines)
+
+  testfillrect();      // Draw rectangles (filled)
+
+  testdrawcircle();    // Draw circles (outlines)
+
+  testfillcircle();    // Draw circles (filled)
+
+  testdrawroundrect(); // Draw rounded rectangles (outlines)
+
+  testfillroundrect(); // Draw rounded rectangles (filled)
+
+  testdrawtriangle();  // Draw triangles (outlines)
+
+  testfilltriangle();  // Draw triangles (filled)
+
+  testdrawchar();      // Draw characters of the default font
+
+  testdrawstyles();    // Draw 'stylized' characters
+
+  testscrolltext();    // Draw scrolling text
+
+  testdrawbitmap();    // Draw a small bitmap image
+
+  // Invert and restore display, pausing in-between
+  display.invertDisplay(true);
+  delay(1000);
+  display.invertDisplay(false);
+  delay(1000);
+
+  testanimate(logo_bmp, LOGO_WIDTH, LOGO_HEIGHT); // Animate bitmaps
+}
+
+
+void testdrawline() {
+  int16_t i;
+
+  display.clearDisplay(); // Clear display buffer
+
+  for(i=0; i<display.width(); i+=4) {
+    display.drawLine(0, 0, i, display.height()-1, SSD1306_WHITE);
+    display.display(); // Update screen with each newly-drawn line
+    delay(1);
+  }
+  for(i=0; i<display.height(); i+=4) {
+    display.drawLine(0, 0, display.width()-1, i, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+  delay(250);
+
+  display.clearDisplay();
+
+  for(i=0; i<display.width(); i+=4) {
+    display.drawLine(0, display.height()-1, i, 0, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+  for(i=display.height()-1; i>=0; i-=4) {
+    display.drawLine(0, display.height()-1, display.width()-1, i, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+  delay(250);
+
+  display.clearDisplay();
+
+  for(i=display.width()-1; i>=0; i-=4) {
+    display.drawLine(display.width()-1, display.height()-1, i, 0, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+  for(i=display.height()-1; i>=0; i-=4) {
+    display.drawLine(display.width()-1, display.height()-1, 0, i, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+  delay(250);
+
+  display.clearDisplay();
+
+  for(i=0; i<display.height(); i+=4) {
+    display.drawLine(display.width()-1, 0, 0, i, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+  for(i=0; i<display.width(); i+=4) {
+    display.drawLine(display.width()-1, 0, i, display.height()-1, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+
+  delay(2000); // Pause for 2 seconds
+}
+
+void testdrawrect(void) {
+  display.clearDisplay();
+
+  for(int16_t i=0; i<display.height()/2; i+=2) {
+    display.drawRect(i, i, display.width()-2*i, display.height()-2*i, SSD1306_WHITE);
+    display.display(); // Update screen with each newly-drawn rectangle
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testfillrect(void) {
+  display.clearDisplay();
+
+  for(int16_t i=0; i<display.height()/2; i+=3) {
+    // The INVERSE color is used so rectangles alternate white/black
+    display.fillRect(i, i, display.width()-i*2, display.height()-i*2, SSD1306_INVERSE);
+    display.display(); // Update screen with each newly-drawn rectangle
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testdrawcircle(void) {
+  display.clearDisplay();
+
+  for(int16_t i=0; i<max(display.width(),display.height())/2; i+=2) {
+    display.drawCircle(display.width()/2, display.height()/2, i, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testfillcircle(void) {
+  display.clearDisplay();
+
+  for(int16_t i=max(display.width(),display.height())/2; i>0; i-=3) {
+    // The INVERSE color is used so circles alternate white/black
+    display.fillCircle(display.width() / 2, display.height() / 2, i, SSD1306_INVERSE);
+    display.display(); // Update screen with each newly-drawn circle
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testdrawroundrect(void) {
+  display.clearDisplay();
+
+  for(int16_t i=0; i<display.height()/2-2; i+=2) {
+    display.drawRoundRect(i, i, display.width()-2*i, display.height()-2*i,
+      display.height()/4, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testfillroundrect(void) {
+  display.clearDisplay();
+
+  for(int16_t i=0; i<display.height()/2-2; i+=2) {
+    // The INVERSE color is used so round-rects alternate white/black
+    display.fillRoundRect(i, i, display.width()-2*i, display.height()-2*i,
+      display.height()/4, SSD1306_INVERSE);
+    display.display();
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testdrawtriangle(void) {
+  display.clearDisplay();
+
+  for(int16_t i=0; i<max(display.width(),display.height())/2; i+=5) {
+    display.drawTriangle(
+      display.width()/2  , display.height()/2-i,
+      display.width()/2-i, display.height()/2+i,
+      display.width()/2+i, display.height()/2+i, SSD1306_WHITE);
+    display.display();
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testfilltriangle(void) {
+  display.clearDisplay();
+
+  for(int16_t i=max(display.width(),display.height())/2; i>0; i-=5) {
+    // The INVERSE color is used so triangles alternate white/black
+    display.fillTriangle(
+      display.width()/2  , display.height()/2-i,
+      display.width()/2-i, display.height()/2+i,
+      display.width()/2+i, display.height()/2+i, SSD1306_INVERSE);
+    display.display();
+    delay(1);
+  }
+
+  delay(2000);
+}
+
+void testdrawchar(void) {
+  display.clearDisplay();
+
+  display.setTextSize(1);      // Normal 1:1 pixel scale
+  display.setTextColor(SSD1306_WHITE); // Draw white text
+  display.setCursor(0, 0);     // Start at top-left corner
+  display.cp437(true);         // Use full 256 char 'Code Page 437' font
+
+  // Not all the characters will fit on the display. This is normal.
+  // Library will draw what it can and the rest will be clipped.
+  for(int16_t i=0; i<256; i++) {
+    if(i == '\n') display.write(' ');
+    else          display.write(i);
+  }
+
+  display.display();
+  delay(2000);
+}
+
+void testdrawstyles(void) {
+  display.clearDisplay();
+
+  display.setTextSize(1);             // Normal 1:1 pixel scale
+  display.setTextColor(SSD1306_WHITE);        // Draw white text
+  display.setCursor(0,0);             // Start at top-left corner
+  display.println(F("Hello, world!"));
+
+  display.setTextColor(SSD1306_BLACK, SSD1306_WHITE); // Draw 'inverse' text
+  display.println(3.141592);
+
+  display.setTextSize(2);             // Draw 2X-scale text
+  display.setTextColor(SSD1306_WHITE);
+  display.print(F("0x")); display.println(0xDEADBEEF, HEX);
+
+  display.display();
+  delay(2000);
+}
+
+void testscrolltext(void) {
+  display.clearDisplay();
+
+  display.setTextSize(2); // Draw 2X-scale text
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(10, 0);
+  display.println(F("scroll"));
+  display.display();      // Show initial text
+  delay(100);
+
+  // Scroll in various directions, pausing in-between:
+  display.startscrollright(0x00, 0x0F);
+  delay(2000);
+  display.stopscroll();
+  delay(1000);
+  display.startscrollleft(0x00, 0x0F);
+  delay(2000);
+  display.stopscroll();
+  delay(1000);
+  display.startscrolldiagright(0x00, 0x07);
+  delay(2000);
+  display.startscrolldiagleft(0x00, 0x07);
+  delay(2000);
+  display.stopscroll();
+  delay(1000);
+}
+
+void testdrawbitmap(void) {
+  display.clearDisplay();
+
+  display.drawBitmap(
+    (display.width()  - LOGO_WIDTH ) / 2,
+    (display.height() - LOGO_HEIGHT) / 2,
+    logo_bmp, LOGO_WIDTH, LOGO_HEIGHT, 1);
+  display.display();
+  delay(1000);
+}
+void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
+  int8_t f, icons[NUMFLAKES][3];
+
+  // Initialize 'snowflake' positions
+  for(f=0; f< NUMFLAKES; f++) {
+    icons[f][XPOS]   = random(1 - LOGO_WIDTH, display.width());
+    icons[f][YPOS]   = -LOGO_HEIGHT;
+    icons[f][DELTAY] = random(1, 6);
+    Serial.print(F("x: "));
+    Serial.print(icons[f][XPOS], DEC);
+    Serial.print(F(" y: "));
+    Serial.print(icons[f][YPOS], DEC);
+    Serial.print(F(" dy: "));
+    Serial.println(icons[f][DELTAY], DEC);
+  }
+
+  unsigned long animationStart = millis();
+  while (millis() - animationStart < 10*1000){ // Loop for 10 seconds...
+    display.clearDisplay(); // Clear the display buffer
+
+    // Draw each snowflake:
+    for(f=0; f< NUMFLAKES; f++) {
+      display.drawBitmap(icons[f][XPOS], icons[f][YPOS], bitmap, w, h, SSD1306_WHITE);
+    }
+
+    display.display(); // Show the display buffer on the screen
+    delay(200);        // Pause for 1/10 second
+
+    // Then update coordinates of each flake...
+    for(f=0; f< NUMFLAKES; f++) {
+      icons[f][YPOS] += icons[f][DELTAY];
+      // If snowflake is off the bottom of the screen...
+      if (icons[f][YPOS] >= display.height()) {
+        // Reinitialize to a random position, just off the top
+        icons[f][XPOS]   = random(1 - LOGO_WIDTH, display.width());
+        icons[f][YPOS]   = -LOGO_HEIGHT;
+        icons[f][DELTAY] = random(1, 6);
+      }
+    }
+  }
+
+  // Clear the screen one last time to clear animation leftovers.
+  display.clearDisplay();
+
+}
+
+

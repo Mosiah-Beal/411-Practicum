@@ -4,7 +4,7 @@ TODO:
         Get a graph of temperature/humid, print current temp/humid
         Give dedicated line to printing messages to user
     
-    
+
     [MENU]
         Add shutdown function
         Add settings view/reset option
@@ -20,4 +20,5 @@ TODO:
     [General]
         Add Debugging levels to suppress output
         Test functions should be only for tests, make new ones for serial version or add if-else to pre-existing code
+        Update component connection statuses on loop (unplug/insert components)
 

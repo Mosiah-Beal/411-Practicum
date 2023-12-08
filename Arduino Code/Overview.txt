@@ -13,6 +13,7 @@ void loop() {
   handleTemperaturesensor();    // Update humidity and temperature
   handleRainSensor();           // Check if rain has shorted the resistive panel
   
+
   /* Update the other outputs of the circuit */
   handleStepper();          // Move the window to the correct position
   handleAlarm();            // Sound the piezo buzzer if conditions are background

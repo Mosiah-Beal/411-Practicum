@@ -250,34 +250,36 @@ char keymap[ROWS][COLS] = {
 
 
 /*************
- * Pin Setup *                            //(silkscreen on PCB)
+ * Pin Setup *            
  * ***********/
 
+
+//#define NAME pin#       //(silkscreen on PCB)
 /* I2C Pins (if you want to relocate the bus) */
-#define I2C_SCL 22                        // located on (SCL)
-#define I2C_SDA 23                        // located on (SDA)
+#define I2C_SCL 22        // located on (SCL)
+#define I2C_SDA 23        // located on (SDA)
 
 /* Rain Sensor */
-#define rainDigital 13                    //located on (13)
+#define rainDigital 13    //located on (13)
 
 /* DHT */
-#define DHT_PIN 15                        // located on (15)
+#define DHT_PIN 15        // located on (15)
 
 /* Stepper Motor */
-#define STEPPER_PIN_1 26                  // located on (A0)
-#define STEPPER_PIN_2 25                  // located on (A1)
-#define STEPPER_PIN_3 12                  // located on [12]
-#define STEPPER_PIN_4 33                  // located on [33]
+#define STEPPER_PIN_1 26  // located on (A0)
+#define STEPPER_PIN_2 25  // located on (A1)
+#define STEPPER_PIN_3 12  // located on [12]
+#define STEPPER_PIN_4 33  // located on [33]
 
 /* LEDS */
-#define POWER_LED 32                      // located on [32]
-#define WINDOW_LED 4                      // located on (A5) 
-#define TEMP_LED_R 18                      // located on (MOSI)
-#define TEMP_LED_G 5                     // located on (SCK)
-#define TEMP_LED_B 19                     // located on (MISO) [miso]
+#define POWER_LED 32      // located on [32]
+#define WINDOW_LED 4      // located on (A5) 
+#define TEMP_LED_R 18     // located on (MOSI)
+#define TEMP_LED_G 5      // located on (SCK)
+#define TEMP_LED_B 19     // located on (MISO)
 
 /* Alarm Buzzer */
-#define ALARM_PIN 21                   // located on (21)
+#define ALARM_PIN 21      // located on (21)
 
 
 
@@ -365,19 +367,20 @@ struct userSettings{
 
 /* Start with default values:
  * upperTemp = 27 (c), lowerTemp = 15 (c), 
- * upperHumidity = 60%, lowerHumidity = 40%, 
+ * upperHumidity = 65%, lowerHumidity = 35%, 
  * tempRange = 5 (c), targetTemperature = 21 (c), 
  * humidityRange = 10%, targetHumidity = 50%
- * DHT_interval = 60 seconds, rain_interval = 60 seconds,
+ * DHT_interval = 30 seconds, rain_interval = 30 seconds,
  * rain_timeout = 60 minutes, monitor_timeout = 15 minutes
  * window_position = closed
  */
  userSettings settings = {
   27.0, 15.0,
-  60.0, 40.0,
+  65.0, 35.0,
   5.0, 21.0,
   10.0, 50.0,
-  30* 1000, 30 *1000, 60 * 60 * 1000, 15 * 60 * 1000,
+  10* 1000, 30 *1000, 
+  60 * 60 * 1000, 15 * 60 * 1000,
   false, false, false, false, false};
 
 /**
@@ -563,16 +566,16 @@ void testscrolltext(void);
 void testdrawbitmap(void);
 void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h);
 
+// Shutdown functions
+void shutdown(void);
+void __shutdown(void);
 
 
 
 
-
-/*************
- * Variables *
- ***********************************************
- * Global variables to store the device states *
- ***********************************************/
+/********************
+ * Global variables *
+ *******************/
 
 /* Debug Flags */
 bool Debug = true; // Set to true to enable debug mode
@@ -604,7 +607,7 @@ float humidity;                               // current humidity
 
 /*************
  *   Timers  *
- * ***********/
+ *************/
 
 /* Handle timers*/
 
@@ -668,12 +671,12 @@ void loop() {
 
   /* Measure temperature and humidity. */
   if (Monitor.DHT_on) {
-    handleTemperaturesensor();    
+    //handleTemperaturesensor();    
   }
 
   /* Check if window needs to be opened or closed */
   if (Monitor.Stepper_on){
-    handleStepper();
+    //handleStepper();
   }
 
   /* Check if alarm needs to be triggered */
@@ -740,7 +743,7 @@ void selectOption(Menu*& current_menu) {
 
   // Check if the current menu exists
   if (current_menu == NULL) {
-    Serial.println("No menu selected");
+    displayMessage("No menu selected");
   } 
   else {
 
@@ -786,7 +789,7 @@ void back() {
     current_menu = current_menu->parent;
   }
   else {
-    Serial.println("No parent menu");
+    displayMessage("No parent menu");
   }
 
 
@@ -902,6 +905,7 @@ void updateTargetTemp() {
   if (key == '1') {
     // Update the target temperature
     updateUserSettings(settings.targetTemperature, false);
+    Monitor.Use_Target_Temp = true;
   }
   else if (key == '2') {
     // Do not update the target temperature
@@ -940,6 +944,7 @@ void updateTempRange() {
   if (key == '1') {
     // Update the temperature range
     updateUserSettings(settings.tempRange, false);
+    Monitor.Use_Target_Temp = true;
   }
   else if (key == '2') {
     // Do not update the temperature range
@@ -978,6 +983,7 @@ void updateUpperTemp() {
   if (key == '1') {
     // Update the upper temperature limit
     updateUserSettings(settings.upperTemp, false);
+    Monitor.Use_Target_Temp = false;
   }
   else if (key == '2') {
     // Do not update the upper temperature limit
@@ -1016,6 +1022,7 @@ void updateLowerTemp() {
   if (key == '1') {
     // Update the lower temperature limit
     updateUserSettings(settings.lowerTemp, false);
+    Monitor.Use_Target_Temp = false;
   }
   else if (key == '2') {
     // Do not update the lower temperature limit
@@ -1054,6 +1061,7 @@ void updateTargetHumidity() {
   if (key == '1') {
     // Update the target humidity
     updateUserSettings(settings.targetHumidity, false);
+    Monitor.Use_Target_Humidity = true;
   }
   else if (key == '2') {
     // Do not update the target humidity
@@ -1092,6 +1100,7 @@ void updateHumidityRange() {
   if (key == '1') {
     // Update the humidity range
     updateUserSettings(settings.humidityRange, false);
+    Monitor.Use_Target_Humidity = true;
   }
   else if (key == '2') {
     // Do not update the humidity range
@@ -1130,6 +1139,7 @@ void updateUpperHumidity() {
   if (key == '1') {
     // Update the upper humidity limit
     updateUserSettings(settings.upperHumidity, false);
+    Monitor.Use_Target_Humidity = false;
   }
   else if (key == '2') {
     // Do not update the upper humidity limit
@@ -1168,6 +1178,7 @@ void updateLowerHumidity() {
   if (key == '1') {
     // Update the lower humidity limit
     updateUserSettings(settings.lowerHumidity, false);
+    Monitor.Use_Target_Humidity = false;
   }
   else if (key == '2') {
     // Do not update the lower humidity limit
@@ -1336,10 +1347,30 @@ void updateMonitorTimeout() {
 }
 
 void restartESP32() {
-  Serial.println("Restarting ESP32...");
+  displayMessage("Restarting ESP32...");
+  delay(1000);
+  shutdown();
+  display.clearDisplay();
   ESP.restart();
 }
 
+void shutdown() {
+  digitalWrite(POWER_LED, LOW);
+  digitalWrite(WINDOW_LED, LOW);
+  digitalWrite(ALARM_PIN, LOW);
+  digitalWrite(TEMP_LED_B, LOW);
+  digitalWrite(TEMP_LED_R, LOW);
+  digitalWrite(TEMP_LED_G, LOW);
+  
+  __shutdown();
+  
+}
+
+void __shutdown() {
+  // IMPLEMENT ME
+  displayMessage("Shutting down...");
+  delay(1000);
+}
 
 /* checks if enough time has passed since last occurance, returns true/false*/
 bool check_interval(unsigned long* previousMillis, long interval) {
@@ -1519,7 +1550,7 @@ if(UpdateTempDisplay){
 
   display.setTextSize(2);
 
-  message = String((int) temperature) + "C " + String((int)humidity) + "%";
+  message = String((int) temperature) + "C   " + String((int)humidity) + "%";
   
   display.println(message);
   display.setTextSize(1);
@@ -1579,6 +1610,9 @@ void handleTemperaturesensor() {
     lastTemperature = temperature;  // save actual temperature for next compare
     lastHumidity = humidity;        // save actual humidity for next compare
   }
+
+  // Ensure the messages get handled
+  SinricPro.handle();
 }
 
 /* handleRainSensor()
@@ -2036,8 +2070,8 @@ void setupMenu() {
     {"Start Monitor", "Settings", "Test systems", "Shutdown"},
     0,
     nullptr,
-    {start_menu, settings_menu, test_menu, nullptr},
-    {nullptr, nullptr, nullptr, /*TODO: Add shutdown function */}
+    {},
+    {}
   };
 
   Menu* TempMenu = new Menu{
@@ -2106,6 +2140,18 @@ void setupMenu() {
 
   //* Connect menus */ 
   /* 1st level menus */
+  
+  // main menu
+  //setParentMenu(nullptr, *main_menu);
+  addChildMenu(main_menu, start_menu);
+  addChildMenu(main_menu, settings_menu);
+  addChildMenu(main_menu, test_menu);
+
+  addFunction(main_menu, nullptr);  // Move to start menu
+  addFunction(main_menu, nullptr);  // Move to settings menu
+  addFunction(main_menu, nullptr);  // Move to test menu
+  addFunction(main_menu, __shutdown);
+
 
   // start menu
   setParentMenu(main_menu, *start_menu);
@@ -2262,9 +2308,9 @@ void setup() {
 
 
 
-/********* 
+/******************
  * Test Functions *
- *********/
+ *****************/
 
 void testKeypad(){  
 
@@ -2587,10 +2633,10 @@ void printWifiStatus() {
   if (currentWifiStatus != lastWifiStatus) {
     switch (currentWifiStatus) {
       case WL_CONNECTED:
-        Serial.println("WiFi connected");
+        displayMessage("WiFi connected");
         break;
       case WL_DISCONNECTED:
-        Serial.println("WiFi disconnected");
+        displayMessage("WiFi disconnected");
         break;
       // Add more cases if you want to handle other status codes
     }
@@ -2602,7 +2648,7 @@ void printWifiStatus() {
 
 
 /*********
- * Utils *    (Or unassigned functions)
+ * Utils * 
  *********/
 
 void toggleAlarm(){
@@ -2728,6 +2774,219 @@ void printMenu(Menu menu) {
       Serial.println("  No function");
     }
   }
+}
+
+void printOLEDMenu(Menu* menu) {
+  clear_menu_lines();
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK); 
+
+  // Determine the top visible menu item
+  int topItem = max( 0, menu->currentSelection - 1);  // show one item above and below the current selection
+
+  // Print the menu on the left side
+  display.setCursor(0, 0);
+  
+  // Print the menu options below the title
+  for (int i = topItem; i < min(topItem + 3, (int) menu->choices.size()); i++) {  // Display 3 items, leave 4th line for messages
+    if (i == menu->currentSelection) {
+      // Highlight the selected option
+      display.print("> ");
+    }
+    display.println(menu->choices[i]);
+  }
+
+  // Print the message on the 4th line
+  //userMessage = "Hello World!";
+  //displayuserMessage(userMessage);
+
+  display.display();
+}
+
+void printUserMessage(const String message) {
+  clear_line(4);
+  display.setTextSize(1);
+  display.setTextColor(WHITE, BLACK);
+
+  // Record the message to the serial monitor
+  Serial.print("Message: ");
+  Serial.println(message);
+
+  // Print the message on the 4th line
+  display.setCursor(0, 24);  // 24 is the y coordinate of the 4th line (75% of 32)
+  
+  // break the message into words so it fits on the screen, check if it fits on the 4th line
+  // Print as much of the message as possible on the 4th line, then wait 3 seconds before processing the rest
+  // characters are 5 pixels wide + 1 pixel space between characters
+  String word = "";
+  int wordWidth = 0;
+  int x = 0;
+  for (int i = 0; i < message.length(); i++) {
+    char c = message.charAt(i);
+    if (c == ' ') {
+      // Print the word if it fits on the 4th line
+      if (x + wordWidth <= 128) {
+        display.print(word);
+        display.print(" ");
+        x += wordWidth + 6; // 6 is the width of a space
+      } else {
+        // The word doesn't fit on the 4th line, so print the message so far and wait 3 seconds
+        display.display();
+        delay(3000);
+        
+        // Clear the display and reset the cursor
+        clear_line(4);
+        display.setCursor(0, 24);
+        x = 0;
+      }
+
+      // Reset the word
+      word = "";
+      wordWidth = 0;
+    } else {
+      // Add the character to the word
+      word += c;
+      wordWidth += 6;
+    }
+  }
+  
+  //Print the last word if it fits on the 4th line
+if (word.length() > 0) {
+  if (x + wordWidth > 128) {
+    // The word doesn't fit on the line, so print the message so far and wait 3 seconds
+    display.display();
+    delay(3000);
+    
+    // Clear the display and reset the cursor
+    clear_line(4);
+    display.setCursor(0, 24);
+    x = 0;
+  }
+
+  // Print the last word
+  display.print(word);
+}
+
+// Show the last word
+display.display();
+
+
+}
+
+void clear_line(int line) {
+  switch(line) {
+    case 1:
+      display.setCursor(0, 0);
+      break;
+    case 2:
+      display.setCursor(0, 8);
+      break;
+    case 3:
+      display.setCursor(0, 16);
+      break;
+    case 4:
+      display.setCursor(0, 24);
+      break;
+    default:
+      Serial.println("Invalid line number");
+      break;
+  }
+  for (int i = 0; i < SCREEN_WIDTH / 6; i++) { // display width of 128 pixels and character width of 6 pixels
+    display.print(' ');
+  }
+  display.display();
+}
+
+void clear_menu_lines() {
+  clear_line(1);
+  clear_line(2);
+  clear_line(3);
+}
+
+void displayMessage(String message) {
+  // determine if message should be passed to Serial Monitor or OLED display (or both)
+  if (Monitor.Display_on) {
+    // Display message on OLED display
+    printUserMessage(message);  //TODO: Add message to queue/break up message into multiple lines
+    // if message > SCREEN_WIDTH / 6, set flag to scroll message
+  }
+  
+  if(!Monitor.Display_on || Debug){
+    // Display message on Serial Monitor
+    Serial.println(message);
+  }
+
+}
+
+void print_long_message(String message) {
+  // overwrites the current menu with a long message
+  Serial.println("Printing long message");
+  Serial.println(message);
+
+  // clear the display
+  display.clearDisplay();
+
+  // Calculate the number of lines needed to display the message
+  int NumCharsPerLine = SCREEN_WIDTH / 10; // 6 is the width of a character
+  int numLines = ceil(message.length() / NumCharsPerLine); // 6 is the width of a character
+
+  Serial.print("Number of lines: ");
+  Serial.println(numLines);
+  
+  int start = 0;  // start of the substring to print
+  int end = 0;    // end of the substring to print
+  int temp_end = 0; // temporary placeholder for the end of the substring to print
+
+  // if the message is too long to fit on the screen, print the first part of the message and wait 3 seconds
+  // When printing substrings, make sure to split on newlines and on the last space before the end of the line
+  for(int i = 0; i < numLines; i++) {
+    // Calculate the end of the substring to print assuming best case scenario
+    end = min(start + NumCharsPerLine, (int) message.length());
+    
+    // Check if the end of the substring needs to be adjusted
+    if(end < message.length()) {
+      // If there is a newline in the substring, move the end to the newline
+      temp_end = message.indexOf('\n', end);
+      if (temp_end != -1) {
+        // move the end to the newline, removing the newline character
+        end = temp_end-1;
+      }
+
+      // Otherwise, if the end of the substring is in the middle of a word,
+      //move the end to the last space before the end of the line
+      else if(message.charAt(end) != ' ') {
+        temp_end = message.lastIndexOf(' ', end);
+        if(temp_end != -1) {
+          end = temp_end;
+        }
+      }
+    }// end if(end < message.length())
+
+    // Serial.print("Start: ");
+    // Serial.print(start);
+    // Serial.print(" End: ");
+    // Serial.println(end);
+
+    // Print the substring
+    //display.setCursor(0, (i % 4) * 8);  // 8 is the height of a character
+    display.println(message.substring(start, end));
+    Serial.println(message.substring(start, end));
+    display.display();
+
+    if(i % 4 == 3) {
+      // Wait 3 before clearing the display
+      delay(3000);
+      display.clearDisplay();
+      display.setCursor(0, 0);
+    }
+
+    // Update the start of the substring to print
+    start = end;
+  }
+   
+
+  // Make sure the last part of the message is printed
+  display.display();
 }
 
 void setRGBLED(int color){
@@ -2864,13 +3123,20 @@ void updateTempFlags() {
     Monitor.Alarm = false;
   }
 
+  // if(!(Monitor.Good_Temp && Monitor.Good_Humidity)){
+  //   Monitor.Alarm = true;
+  // }
+  // else{
+  //   Monitor.Alarm = false;
+  // }
+
 }
+
 
 
 /****************
  * Loop Rewrite *
  ***************/
-
 void loop2() {
   /* Status updates*/
   // WiFi
@@ -2897,222 +3163,6 @@ void loop2() {
 
 
 }
-
-
-void printOLEDMenu(Menu* menu) {
-  clear_menu_lines();
-  display.setTextSize(1);
-  display.setTextColor(WHITE, BLACK); 
-
-  // Determine the top visible menu item
-  int topItem = max( 0, menu->currentSelection - 1);  // show one item above and below the current selection
-
-  // Print the menu on the left side
-  display.setCursor(0, 0);
-  
-  // Print the menu options below the title
-  for (int i = topItem; i < min(topItem + 3, (int) menu->choices.size()); i++) {  // Display 3 items, leave 4th line for messages
-    if (i == menu->currentSelection) {
-      // Highlight the selected option
-      display.print("> ");
-    }
-    display.println(menu->choices[i]);
-  }
-
-  // Print the message on the 4th line
-  //userMessage = "Hello World!";
-  //displayuserMessage(userMessage);
-
-  display.display();
-}
-
-void printUserMessage(const String message) {
-  clear_line(4);
-  display.setTextSize(1);
-  display.setTextColor(WHITE, BLACK);
-
-  // Record the message to the serial monitor
-  Serial.print("Message: ");
-  Serial.println(message);
-
-  // Print the message on the 4th line
-  display.setCursor(0, 24);  // 24 is the y coordinate of the 4th line (75% of 32)
-  
-  // break the message into words so it fits on the screen, check if it fits on the 4th line
-  // Print as much of the message as possible on the 4th line, then wait 3 seconds before processing the rest
-  // characters are 5 pixels wide + 1 pixel space between characters
-  String word = "";
-  int wordWidth = 0;
-  int x = 0;
-  for (int i = 0; i < message.length(); i++) {
-    char c = message.charAt(i);
-    if (c == ' ') {
-      // Print the word if it fits on the 4th line
-      if (x + wordWidth <= 128) {
-        display.print(word);
-        display.print(" ");
-        x += wordWidth + 6; // 6 is the width of a space
-      } else {
-        // The word doesn't fit on the 4th line, so print the message so far and wait 3 seconds
-        display.display();
-        delay(3000);
-        
-        // Clear the display and reset the cursor
-        clear_line(4);
-        display.setCursor(0, 24);
-        x = 0;
-      }
-
-      // Reset the word
-      word = "";
-      wordWidth = 0;
-    } else {
-      // Add the character to the word
-      word += c;
-      wordWidth += 6;
-    }
-  }
-  
-  //Print the last word if it fits on the 4th line
-if (word.length() > 0) {
-  if (x + wordWidth > 128) {
-    // The word doesn't fit on the line, so print the message so far and wait 3 seconds
-    display.display();
-    delay(3000);
-    
-    // Clear the display and reset the cursor
-    clear_line(4);
-    display.setCursor(0, 24);
-    x = 0;
-  }
-
-  // Print the last word
-  display.print(word);
-}
-
-// Show the last word
-display.display();
-
-
-}
-
-void clear_line(int line) {
-  switch(line) {
-    case 1:
-      display.setCursor(0, 0);
-      break;
-    case 2:
-      display.setCursor(0, 8);
-      break;
-    case 3:
-      display.setCursor(0, 16);
-      break;
-    case 4:
-      display.setCursor(0, 24);
-      break;
-    default:
-      Serial.println("Invalid line number");
-      break;
-  }
-  for (int i = 0; i < SCREEN_WIDTH / 6; i++) { // display width of 128 pixels and character width of 6 pixels
-    display.print(' ');
-  }
-  display.display();
-}
-
-void clear_menu_lines() {
-  clear_line(1);
-  clear_line(2);
-  clear_line(3);
-}
-
-
-void displayMessage(String message) {
-  // determine if message should be passed to Serial Monitor or OLED display (or both)
-  if (Monitor.Display_on) {
-    // Display message on OLED display
-    printUserMessage(message);  //TODO: Add message to queue/break up message into multiple lines
-    // if message > SCREEN_WIDTH / 6, set flag to scroll message
-  }
-  
-  if(!Monitor.Display_on || Debug){
-    // Display message on Serial Monitor
-    Serial.println(message);
-  }
-
-}
-
-void print_long_message(String message) {
-  // overwrites the current menu with a long message
-  Serial.println("Printing long message");
-  Serial.println(message);
-
-  // clear the display
-  display.clearDisplay();
-
-  // Calculate the number of lines needed to display the message
-  int NumCharsPerLine = SCREEN_WIDTH / 10; // 6 is the width of a character
-  int numLines = ceil(message.length() / NumCharsPerLine); // 6 is the width of a character
-
-  Serial.print("Number of lines: ");
-  Serial.println(numLines);
-  
-  int start = 0;  // start of the substring to print
-  int end = 0;    // end of the substring to print
-  int temp_end = 0; // temporary placeholder for the end of the substring to print
-
-  // if the message is too long to fit on the screen, print the first part of the message and wait 3 seconds
-  // When printing substrings, make sure to split on newlines and on the last space before the end of the line
-  for(int i = 0; i < numLines; i++) {
-    // Calculate the end of the substring to print assuming best case scenario
-    end = min(start + NumCharsPerLine, (int) message.length());
-    
-    // Check if the end of the substring needs to be adjusted
-    if(end < message.length()) {
-      // If there is a newline in the substring, move the end to the newline
-      temp_end = message.indexOf('\n', end);
-      if (temp_end != -1) {
-        // move the end to the newline, removing the newline character
-        end = temp_end-1;
-      }
-
-      // Otherwise, if the end of the substring is in the middle of a word,
-      //move the end to the last space before the end of the line
-      else if(message.charAt(end) != ' ') {
-        temp_end = message.lastIndexOf(' ', end);
-        if(temp_end != -1) {
-          end = temp_end;
-        }
-      }
-    }// end if(end < message.length())
-
-    // Serial.print("Start: ");
-    // Serial.print(start);
-    // Serial.print(" End: ");
-    // Serial.println(end);
-
-    // Print the substring
-    //display.setCursor(0, (i % 4) * 8);  // 8 is the height of a character
-    display.println(message.substring(start, end));
-    Serial.println(message.substring(start, end));
-    display.display();
-
-    if(i % 4 == 3) {
-      // Wait 3 before clearing the display
-      delay(3000);
-      display.clearDisplay();
-      display.setCursor(0, 0);
-    }
-
-    // Update the start of the substring to print
-    start = end;
-  }
-   
-
-  // Make sure the last part of the message is printed
-  display.display();
-}
-
 
 
 /******************

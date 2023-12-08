@@ -1,5 +1,56 @@
 Overview
 
+void loop() {
+  /* WiFi maintanence */
+  SinricPro.handle();       // Communicate with Sinric Servers and check for changes
+  printWifiStatus();        // Inform user of changes in connectivity
+  
+  /* Manage the UI */
+  handleKeypad();           // Get inputs from Serial Monitor or keypad
+  handleDisplay();          // Output information through the Serial Monitor or OLED display
+
+  /* Update readings from the sensors */
+  handleTemperaturesensor();    // Update humidity and temperature
+  handleRainSensor();           // Check if rain has shorted the resistive panel
+  
+  /* Update the other outputs of the circuit */
+  handleStepper();          // Move the window to the correct position
+  handleAlarm();            // Sound the piezo buzzer if conditions are background
+  handleLEDS();             // Update status LEDs
+  
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Handlers: Non-blocking calls which update information before returning
 Temperature - Get humidity and Temperature, updates Good temp and humidity flags
 Rain Sensor - check if a short occured in the resistive panel, updates rain flag

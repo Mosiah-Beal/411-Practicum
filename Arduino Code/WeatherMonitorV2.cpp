@@ -1519,7 +1519,7 @@ if(UpdateTempDisplay){
 
   display.setTextSize(2);
 
-  message = String(temperature) + "C " + String((int)humidity) + "%";
+  message = String((int) temperature) + "C " + String((int)humidity) + "%";
   
   display.println(message);
   display.setTextSize(1);

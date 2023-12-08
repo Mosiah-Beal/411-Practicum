@@ -536,7 +536,7 @@ void simulateRain(void);
 
 // Oled display functions
 void testdrawstyles(void);
-void printMenu(Menu* menu);
+void printOLEDMenu(Menu* menu);
 void printUserMessage(String message);
 
 void clear_line(int line);
@@ -1737,7 +1737,7 @@ void handleDisplay(){
   if(UpdateDisplay){
     // Print the current menu over I2C
     if(Monitor.Display_on){
-      printMenu(current_menu);
+      printOLEDMenu(current_menu);
     }
 
     // Print the current menu status to the serial monitor
@@ -2257,7 +2257,7 @@ void setup() {
   //handleTemperaturesensor(); // check temperature sensor
 
   delay(5000);
-  printMenu(current_menu);  // 5 is the number of items, 0 is the menu index
+  printOLEDMenu(current_menu);  // 5 is the number of items, 0 is the menu index
 }
 
 
@@ -2899,7 +2899,7 @@ void loop2() {
 }
 
 
-void printMenu(Menu* menu) {
+void printOLEDMenu(Menu* menu) {
   clear_menu_lines();
   display.setTextSize(1);
   display.setTextColor(WHITE, BLACK); 

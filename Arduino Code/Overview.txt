@@ -1,0 +1,7 @@
+Overview
+
+Handlers: Non-blocking calls which update information before returning
+Temperature - Get humidity and Temperature, updates Good temp and humidity flags
+Rain Sensor - check if a short occured in the resistive panel, updates rain flag
+keypad - check if user pressed a key, updates menu pointers
+display - updates display to show current menu and/or any messages

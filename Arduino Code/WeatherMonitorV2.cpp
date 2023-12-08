@@ -1362,13 +1362,14 @@ void shutdown() {
   digitalWrite(TEMP_LED_R, LOW);
   digitalWrite(TEMP_LED_G, LOW);
   
-  __shutdown();
+  //__shutdown();
   
 }
 
 void __shutdown() {
   // IMPLEMENT ME
   displayMessage("Shutting down...");
+  shutdown();
   delay(1000);
 }
 
@@ -1642,7 +1643,8 @@ void handleRainSensor(){
     }
     else {
       Monitor.Rain = true;
-      Serial.println("It's raining!");
+      displayMessage("It's raining!");
+      Monitor.Alarm = true;
     }
   }
 }
@@ -1810,6 +1812,7 @@ void handleAlarm(){
 
   if(Monitor.Silent){
     noTone(ALARM_PIN);
+    Monitor.Alarm = false;
     return;
   }
 
@@ -3118,7 +3121,9 @@ void updateTempFlags() {
   
   // Update Alarm if necessary
   if (settings.too_hot || settings.too_cold || settings.too_humid || settings.too_dry) {
-    Monitor.Alarm = true;
+    if(!Monitor.Silent){
+      Monitor.Alarm = true;
+    }
   } else {
     Monitor.Alarm = false;
   }

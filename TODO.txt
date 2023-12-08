@@ -1,24 +1,36 @@
 TODO:
     [OLED]
+
         Use monitor.display flag to send output to OLED or Serial respectively (for all print messages) [x]
         Get a graph of temperature/humid, print current temp/humid [scrapped]
         Give dedicated line to printing messages to user [x]
+
+        Use monitor.display flag to send output to OLED or Serial respectively (for all print messages)
+        Get a graph of temperature/humid, print current temp/humid
+        Give dedicated line to printing messages to user
+
     
 
     [MENU]
         Add shutdown function
         Add settings view/reset option
+
         Add toggle to view only readings/graph (cancel on keypad input) [x]
         Show keypresses in live time when entering new values. [x]
 
 
     [LOOP]
         Refactor handle functions to work independently and not take control from each other [x?]
-        The goal is to have most of handlers work silently in background updating variables
+
+        Add toggle to view only readings/graph (cancel on keypad input)
+        Show keypresses in live time when entering new values.
+
 
 
     [General]
+
         Add Debugging levels to suppress output [partial]
+
         Test functions should be only for tests, make new ones for serial version or add if-else to pre-existing code
         Update component connection statuses on loop (unplug/insert components)
 

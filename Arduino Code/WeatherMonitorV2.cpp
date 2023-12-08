@@ -1,3 +1,4 @@
+
 // Info: Practicum Project for ECE 411
 /**
  * @file WeatherMonitorV2.cpp
@@ -1991,7 +1992,13 @@ void setupDisplay() {
   display.setTextColor(WHITE, BLACK);
   display.setCursor(0,0);
 
+
+/* Prototype definitions */
+// Menu creation functions
+void setParentMenu(Menu* parent_menu, Menu& child_menu) {
+  child_menu.parent = parent_menu;
 }
+
 
 /***********************************
  * setupMenu() - Sets up the menu system
@@ -2320,6 +2327,7 @@ void testKeypad(){
   if(Monitor.Keypad_on == false){
     displayMessage("Keypad not initialized!");
     return;
+
   }
 
   // print the key pressed until *#* is pressed
@@ -2356,6 +2364,7 @@ void testKeypad(){
   }//end while
   
 }
+
 
 void testDisplay(){
   if(Monitor.Display_on == false){
@@ -2456,121 +2465,30 @@ void testAlarm(){
   noTone(ALARM_PIN);
   Serial.println("Alarm off");
   
+
+void scrollDown(Menu &menu) {
+  menu.currentSelection++;
+  if (menu.currentSelection >= menu.choices.size()) {
+    menu.currentSelection = 0;
+  }
+
 }
 
 /**
- * @brief Runs a test of the LEDs
+ * selectOption() - Selects the current option in the menu
+ * @param current_menu - The current menu layer
  * 
- * Turns on the Power LED for 3 seconds before turning it off.
- * Turns on the Status LED for 3 seconds before turning it off.
+ * This function checks if the current selection is a function or a submenu.
+ * If it is a function for the option selected, it calls the function associated
+ * with the current selection.
+ * If there is no associated function then it is a submenu, and it changes the current menu
+ * to the submenu associated with the current selection.
  * 
- * Sets Temperature RGB LED to white for 3 seconds.
- * Then turns LED red, blue, green for 3 seconds each.
- * Then cycles through the color spectrum for 5 seconds.
- * Then turns off the Temperature LED.
+ * If the current menu has no parent, then it is the main menu and it will not change the current menu.
  * 
  */
-void testLEDs(){
-  //TODO: Add LED functionality
-  Serial.println("Testing LEDs");
+void selectOption(Menu* current_menu) {
 
-  Serial.println("Power LED on");
-  digitalWrite(POWER_LED, HIGH);
-  delay(3000);
-  Serial.println("Power LED off");
-  digitalWrite(POWER_LED, LOW);
-
-
-  Serial.println("Status LED on");
-  digitalWrite(WINDOW_LED, HIGH);
-  delay(3000);
-  Serial.println("Status LED off");
-  digitalWrite(WINDOW_LED, LOW);
-
-
-  Serial.println("Temperature LED on");
-  // White
-  analogWrite(TEMP_LED_R, 255);
-  analogWrite(TEMP_LED_G, 255);
-  analogWrite(TEMP_LED_B, 255);
-  delay(3000);
-
-  Serial.println("Temperature LED: Too Hot/Dry");
-  // Red
-  analogWrite(TEMP_LED_R, 255);
-  analogWrite(TEMP_LED_G, 0);
-  analogWrite(TEMP_LED_B, 0);
-  delay(3000);
-
-  Serial.println("Temperature LED: Too Cold/Wet");
-  // Blue
-  analogWrite(TEMP_LED_R, 0);
-  analogWrite(TEMP_LED_G, 0);
-  analogWrite(TEMP_LED_B, 255);
-  delay(3000);
-
-  Serial.println("Temperature LED: Just Right");
-  // Green
-  analogWrite(TEMP_LED_R, 0);
-  analogWrite(TEMP_LED_G, 255);
-  analogWrite(TEMP_LED_B, 0);
-  delay(3000);
-  
-  // Timing to cycle through the color spectrum in 5 seconds
-  int totalSteps = 6 * 256; // 6 color transitions, 256 steps each
-  int totalTime = 5000; // Total time for the color sweep in milliseconds
-  int delayTime = totalTime / totalSteps; // Time to delay between each step
-
-  Serial.println("Temperature LED: Color Sweep");
-  // Sweep through the color spectrum
-
-  for (int i = 0; i < 256; i++) {
-    // Red to Yellow
-    analogWrite(TEMP_LED_R, 255);
-    analogWrite(TEMP_LED_G, i);
-    analogWrite(TEMP_LED_B, 0);
-    delay(delayTime);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    // Yellow to Green
-    analogWrite(TEMP_LED_R, 255 - i);
-    analogWrite(TEMP_LED_G, 255);
-    analogWrite(TEMP_LED_B, 0);
-    delay(delayTime);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    // Green to Cyan
-    analogWrite(TEMP_LED_R, 0);
-    analogWrite(TEMP_LED_G, 255);
-    analogWrite(TEMP_LED_B, i);
-    delay(delayTime);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    // Cyan to Blue
-    analogWrite(TEMP_LED_R, 0);
-    analogWrite(TEMP_LED_G, 255 - i);
-    analogWrite(TEMP_LED_B, 255);
-    delay(delayTime);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    // Blue to Magenta
-    analogWrite(TEMP_LED_R, i);
-    analogWrite(TEMP_LED_G, 0);
-    analogWrite(TEMP_LED_B, 255);
-    delay(delayTime);
-  }
-
-  for (int i = 0; i < 256; i++) {
-    // Magenta to Red
-    analogWrite(TEMP_LED_R, 255);
-    analogWrite(TEMP_LED_G, 0);
-    analogWrite(TEMP_LED_B, 255 - i);
-    delay(delayTime);
-  }
 
   // Turn off Temperature LED
   Serial.println("Temperature LED off");
@@ -2642,68 +2560,67 @@ void printWifiStatus() {
         displayMessage("WiFi disconnected");
         break;
       // Add more cases if you want to handle other status codes
-    }
 
-    lastWifiStatus = currentWifiStatus;
+  // Check if the current menu exists
+  if (current_menu == NULL) {
+    Serial.println("No menu selected");
+  } 
+  else {
+
+    // Check if the current selection has a function associated with it
+    if (current_menu->currentSelection < current_menu->functions.size()
+    && current_menu->functions[current_menu->currentSelection] != nullptr) {
+      // Call the function associated with the current selection
+      current_menu->functions[current_menu->currentSelection]();
+    }
+    // Check if the current selection has a submenu associated with it
+    else if (current_menu->currentSelection < current_menu->children.size() 
+    && current_menu->children[current_menu->currentSelection] != nullptr) {
+      // Change the current menu to the submenu associated with the current selection
+      current_menu = current_menu->children[current_menu->currentSelection];
+    }
+    else {
+      Serial.println("No function or submenu associated with current selection");
+
+    }
   }
+
 }
 
 
-
-/*********
- * Utils * 
- *********/
 
 void toggleAlarm(){
   Monitor.Silent = !Monitor.Silent;
 }
 
 /**
- * @brief Simulates rain occuring in a random interval between 1 and 5 minutes
+ * @brief Goes back to the parent menu
  * 
- * This function simulates rain occuring in a random interval between 1 and 5 minutes.
- * When called, it will roll a random number between 1 and 5 and print that it is raining only
- * if the number is 1.
- * Updates the rain flag in the Monitor struct.
+ * If the current menu has a parent, then it will change the current menu to the parent menu.
+ * If the current menu has no parent, then it is the main menu and it will not change the current menu.
  * 
  */
-void simulateRain(){
-  // 1 in 5 chance of rain
-  int raining = ((rand() % 5 + 1) == 1);
+void back() {
+  // Print the fields of the current menu
+  //printMenu(*current_menu);
 
-  // Inform user if it's raining through serial monitor
-  if(raining){
-    Serial.println("It's raining!");
-  }
-  else{
-    Serial.println("It's not raining!");
-  }
+  if (current_menu->parent != NULL) {
+    // Inform the user what parent menu they are going back to
+    Serial.print("Going back to ");
+    Serial.println(current_menu->parent->title);
 
-  // Set rain flag
-  Monitor.Rain = raining;
+   // Change the current menu to the parent menu
+    current_menu = current_menu->parent;
+  }
+  else {
+    Serial.println("No parent menu");
+  }
 
 
 }
 
-/**
- * @brief Generates random temperature and humidity values to simulate readings
- * 
- * This function simulates temperature and humidity readings with random values.
- * The temperature will be a random value between 10C and 30C.
- * The humidity will be a random value between 30% and 70%.
- * 
- * 
- * 
- */
-void simulateTemperature(){
-  //simulate random temperature reading between 10C and 30C
-  temperature = rand() % 20 + 10;
 
-  //simulate random humidity reading between 30% and 70%
-  humidity = rand() % 40 + 30;
-  
-}
-
+// Menu utility functions
 /**
  * printMenuStatus() - Prints the current menu status to the serial monitor
  * @param menu - The current menu layer
@@ -3500,5 +3417,6 @@ void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h) {
   display.clearDisplay();
 
 }
+
 
 

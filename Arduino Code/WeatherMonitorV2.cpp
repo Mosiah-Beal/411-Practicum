@@ -825,13 +825,21 @@ void updateUserSettings(UserSetting& setting, bool isTime) {
   // Determine if input comes from keypad or Serial Monitor
   if (Monitor.Keypad_on){
     // Get input from keypad
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("Enter new setting");
+    display.println("(press # when done):");
+    display.display();
+
+
+
     Serial.println("Enter new setting (press # when done):");
     char key = 0;
     while (key != '#') {
       key = get_key();
-      if (key != 0) {
+      if (key != 0 && key != '#') {
         input += key;
-        Serial.print(key);
+        displayMessage((String) input);
       }
     }
     Serial.println();
@@ -854,9 +862,11 @@ void updateUserSettings(UserSetting& setting, bool isTime) {
   }
 
   // Print the new setting
-  Serial.print("New setting: ");
-  Serial.println(setting);
-
+  String message = "New setting: " + String(setting);
+  if (isTime) {
+    message += " min";
+  }
+  displayMessage(message);
 }
 
 /** updateTargetTemperature() - Updates the target temperature and the range of acceptable temperatures
@@ -866,164 +876,463 @@ void updateUserSettings(UserSetting& setting, bool isTime) {
  */
 void updateTargetTemp() {
   // Print the current target temperature
-  String message = "Current target temperature: " + String(settings.targetTemperature);
-  print_long_message(message);
+  String message = "Currently: " + String(settings.targetTemperature) + " C\n";
+  displayMessage(message);
 
   // bad blocking delay FIXME: interrupts?
   delay(3000);
 
   // Determine if user wants to change the target temperature
 
-  message = "Do you want to change the target temperature?\n";
-  message += "(1. Yes / 2. No)\n";
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
 
-  print_long_message(message);
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
 
-  Serial.println("Do you want to change the target temperature?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
 
-
-
-
-
-  updateUserSettings(settings.targetTemperature, false);
+  if (key == '1') {
+    // Update the target temperature
+    updateUserSettings(settings.targetTemperature, false);
+  }
+  else if (key == '2') {
+    // Do not update the target temperature
+    Serial.println("Target temperature not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateTempRange() {
-  // Print the current temperature range
-  Serial.print("Current temperature range: ");
-  Serial.println(settings.tempRange);
+  String message = "Currently: " + String(settings.tempRange) + " C\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the temperature range
-  Serial.println("Do you want to change the temperature range?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.tempRange, false);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the temperature range
+    updateUserSettings(settings.tempRange, false);
+  }
+  else if (key == '2') {
+    // Do not update the temperature range
+    Serial.println("Temp range not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateUpperTemp() {
-  // Print the current upper temperature
-  Serial.print("Current upper temperature: ");
-  Serial.println(settings.upperTemp);
+  String message = "Currently: " + String(settings.upperTemp) + " C\n";
+  displayMessage(message);
 
-  // Determine if user wants to change the upper temperature
-  Serial.println("Do you want to change the upper temperature?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.upperTemp, false);
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
+
+  // Determine if user wants to change the upper temperature limit
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the upper temperature limit
+    updateUserSettings(settings.upperTemp, false);
+  }
+  else if (key == '2') {
+    // Do not update the upper temperature limit
+    Serial.println("upper temp not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateLowerTemp() {
-  // Print the current lower temperature
-  Serial.print("Current lower temperature: ");
-  Serial.println(settings.lowerTemp);
+  String message = "Currently: " + String(settings.lowerTemp) + " C\n";
+  displayMessage(message);
 
-  // Determine if user wants to change the lower temperature
-  Serial.println("Do you want to change the lower temperature?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.lowerTemp, false);
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
+
+  // Determine if user wants to change the lower temperature limit
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the lower temperature limit
+    updateUserSettings(settings.lowerTemp, false);
+  }
+  else if (key == '2') {
+    // Do not update the lower temperature limit
+    Serial.println("lower temp not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateTargetHumidity() {
-  // Print the current target humidity
-  Serial.print("Current target humidity: ");
-  Serial.println(settings.targetHumidity);
+  String message = "Currently: " + String(settings.targetHumidity) + " %\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the target humidity
-  Serial.println("Do you want to change the target humidity?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.targetHumidity, false);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the target humidity
+    updateUserSettings(settings.targetHumidity, false);
+  }
+  else if (key == '2') {
+    // Do not update the target humidity
+    Serial.println("Target humidity not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateHumidityRange() {
-  // Print the current humidity range
-  Serial.print("Current humidity range: ");
-  Serial.println(settings.humidityRange);
+  String message = "Currently: " + String(settings.humidityRange) + " %\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the humidity range
-  Serial.println("Do you want to change the humidity range?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.humidityRange, false);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the humidity range
+    updateUserSettings(settings.humidityRange, false);
+  }
+  else if (key == '2') {
+    // Do not update the humidity range
+    Serial.println("Humidity range not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateUpperHumidity() {
-  // Print the current upper humidity
-  Serial.print("Current upper humidity: ");
-  Serial.println(settings.upperHumidity);
+  String message = "Currently: " + String(settings.upperHumidity) + " %\n";
+  displayMessage(message);
 
-  // Determine if user wants to change the upper humidity
-  Serial.println("Do you want to change the upper humidity?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.upperHumidity, false);
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
+
+  // Determine if user wants to change the upper humidity limit
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the upper humidity limit
+    updateUserSettings(settings.upperHumidity, false);
+  }
+  else if (key == '2') {
+    // Do not update the upper humidity limit
+    Serial.println("upper humidity not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateLowerHumidity() {
-  // Print the current lower humidity
-  Serial.print("Current lower humidity: ");
-  Serial.println(settings.lowerHumidity);
+  String message = "Currently: " + String(settings.lowerHumidity) + " %\n";
+  displayMessage(message);
 
-  // Determine if user wants to change the lower humidity
-  Serial.println("Do you want to change the lower humidity?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.lowerHumidity, false);
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
+
+  // Determine if user wants to change the lower humidity limit
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if (key == '1') {
+    // Update the lower humidity limit
+    updateUserSettings(settings.lowerHumidity, false);
+  }
+  else if (key == '2') {
+    // Do not update the lower humidity limit
+    Serial.println("lower humidity not changed");
+  }
+  else {
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateDHTInterval() {
   // Print the current DHT interval
-  Serial.print("Current DHT interval: ");
-  Serial.print(settings.DHT_interval / (60 * 1000)); // Convert from milliseconds to minutes
-  Serial.println("minutes");
+  String message = "Current DHT interval: " + String(settings.DHT_interval / (60 * 1000)) + " minutes\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the DHT interval
-  Serial.println("Do you want to change the DHT interval?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.DHT_interval, true);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0) {
+    // Wait for input
+    key = get_key();
+  }
+
+  if(key == '1'){
+    // Update the DHT interval
+    updateUserSettings(settings.DHT_interval, true);
+  }
+  else if(key == '2'){
+    // Do not update the DHT interval
+    Serial.println("DHT interval not changed");
+  }
+  else{
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateRainInterval() {
   // Print the current rain interval
-  Serial.print("Current rain interval: ");
-  Serial.print(settings.rain_interval / (60 * 1000)); // Convert from milliseconds to minutes
-  Serial.println("minutes");
+  String message = "Current rain interval: " + String(settings.rain_interval / (60 * 1000)) + " minutes\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the rain interval
-  Serial.println("Do you want to change the rain interval?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.rain_interval, true);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0){
+    // Wait for input
+    key = get_key();
+  }
+
+  if(key == '1'){
+    // Update the rain interval
+    updateUserSettings(settings.rain_interval, true);
+  }
+  else if(key == '2'){
+    // Do not update the rain interval
+    Serial.println("Rain interval not changed");
+  }
+  else{
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateRainTimeout() {
   // Print the current rain timeout
-  Serial.print("Current rain timeout: ");
-  Serial.print(settings.rain_timeout / (60 * 1000)); // Convert from milliseconds to minutes
-  Serial.println("minutes");
+  String message = "Current rain timeout: " + String(settings.rain_timeout / (60 * 1000)) + " minutes\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the rain timeout
-  Serial.println("Do you want to change the rain timeout?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.rain_timeout, true);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+
+  char key = get_key();
+  while (key == 0){
+    // Wait for input
+    key = get_key();
+  }
+
+  if(key == '1'){
+    // Update the rain timeout
+    updateUserSettings(settings.rain_timeout, true);
+  }
+  else if(key == '2'){
+    // Do not update the rain timeout
+    Serial.println("Rain timeout not changed");
+  }
+  else{
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void updateMonitorTimeout() {
   // Print the current monitor timeout
-  Serial.print("Current monitor timeout: ");
-  Serial.print(settings.monitor_timeout / (60 * 1000)); // Convert from milliseconds to minutes
-  Serial.println("minutes");
+  String message = "Current monitor timeout: " + String(settings.monitor_timeout / (60 * 1000)) + " minutes\n";
+  displayMessage(message);
+
+  // bad blocking delay FIXME: interrupts?
+  delay(3000);
 
   // Determine if user wants to change the monitor timeout
-  Serial.println("Do you want to change the monitor timeout?");
-  Serial.println("1. Yes");
-  Serial.println("2. No");
-  updateUserSettings(settings.monitor_timeout, false);
+
+  display.clearDisplay();
+  display.setCursor(0,0);
+  message = "Change?\n";
+  display.println(message);
+
+  message = "(1. Yes / 2. No)\n";
+  display.println(message);
+  display.display();
+  
+  char key = get_key();
+  while (key == 0){
+    // Wait for input
+    key = get_key();
+  }
+
+  if(key == '1'){
+    // Update the monitor timeout
+    updateUserSettings(settings.monitor_timeout, true);
+  }
+  else if(key == '2'){
+    // Do not update the monitor timeout
+    Serial.println("Monitor timeout not changed");
+  }
+  else{
+    // Invalid input
+    Serial.println("Invalid input");
+  }
 }
 
 void restartESP32() {

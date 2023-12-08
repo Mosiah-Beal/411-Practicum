@@ -306,7 +306,7 @@ struct MonitorState {
   bool Stepper_on;    //Stepper motor is controlled
   
   //Control states
-  bool Window_open;   //Window is open
+  bool Window_open;   //Window is open (true) or closed (false)
   bool Good_Temp;     //Temperature is within limits
   bool Good_Humidity; //Humidity is within limits
   bool Rain;          //Rain sensor is wet
@@ -317,6 +317,7 @@ struct MonitorState {
   bool Use_Target_Humidity; //Use target humidity
   bool Window_Manual;       //Window is manually controlled
   bool Alarm;               //Alarm is triggered
+  bool Silent;              //Alarm is silent
   bool Sleep;               //Sleep mode is active
 
   bool Use_SinricPro;       //Use Sinric Pro ?
@@ -327,10 +328,10 @@ struct MonitorState {
 //window closed, unsafe temperature, unsafe humidity, not currently raining, and menu displayed
 //Using temperature limits, Using humidity limits, window is controlled manually, alarm off, and sleep off
 //use sinric pro
-static MonitorState Monitor = {
+ MonitorState Monitor = {
   false, false, true, true, false,
   false, false, false, false, true,
-  false, false, true, false, false,
+  false, false, true, false, false, false,
   true};
 
 struct userSettings{
@@ -355,7 +356,11 @@ struct userSettings{
   unsigned long monitor_timeout;//Timeout for the monitor (ms) //effectively how long to stay awake after last keypad event
 
   // Other settings
-  //type window_position; //Current position of window (manually set to open or closed)
+  bool too_hot; //Temperature is too hot
+  bool too_cold; //Temperature is too cold
+  bool too_humid; //Humidity is too high
+  bool too_dry; //Humidity is too low
+  bool window_open; //Window is manually set to open
 };
 
 /* Start with default values:
@@ -367,12 +372,13 @@ struct userSettings{
  * rain_timeout = 60 minutes, monitor_timeout = 15 minutes
  * window_position = closed
  */
-static userSettings settings = {
+ userSettings settings = {
   27.0, 15.0,
   60.0, 40.0,
   5.0, 21.0,
   10.0, 50.0,
-  30* 1000, 30 *1000, 60 * 60 * 1000, 15 * 60 * 1000};
+  30* 1000, 30 *1000, 60 * 60 * 1000, 15 * 60 * 1000,
+  false, false, false, false, false};
 
 /**
  * Main menu
@@ -450,6 +456,7 @@ void handleSleep(void);
 void handleLEDs(void);
 void printWifiStatus(void);
 void watchSensors(void);
+void toggleAlarm(void);
 
 
 // Menu construction functions
@@ -520,6 +527,8 @@ void testTemperatureSensor(void);
 void testStepper(void);
 void testAlarm(void);
 void testLEDs(void);
+void setRGBLED(int color);
+void updateTempFlags(void);
 
 // Simulated input functions
 void simulateTemperature(void);
@@ -567,8 +576,9 @@ void testanimate(const uint8_t *bitmap, uint8_t w, uint8_t h);
 
 /* Debug Flags */
 bool Debug = true; // Set to true to enable debug mode
-bool simulatedRain = false; // Set to true to simulate rain
-bool simulatedTemperature = false; // Set to true to simulate temperature
+bool UpdateDisplay = true; // Set to true to update the display
+bool UpdateTempDisplay = false; // Set to true to update the temperature display
+bool keypress = false; // Set to true when a key is pressed
 
 // Global variable to store the last known WiFi status
 wl_status_t lastWifiStatus = WL_IDLE_STATUS;
@@ -586,7 +596,6 @@ std::map<String, bool> globalToggleStates;
 bool deviceIsOn;                              // Temeprature sensor on/off state
 float lastTemperature;                        // last known temperature (for compare)
 float lastHumidity;                           // last known humidity (for compare)
-unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
 
 float temperature;                            // current temperature
 float humidity;                               // current humidity
@@ -627,8 +636,8 @@ unsigned long test_previous_millis = 0;                           // will store 
 const long test_refresh_interval = 10 * 1000;                      // interval at which to run test (in milliseconds)
 
 /* Alarm */
-unsigned long alarm_previous_millis = 0;                            // will store last time alarm was triggered
-const long alarm_refresh_interval = 5 * 1000;                       // interval at which to trigger alarm (in milliseconds)
+unsigned long test_alarm_previous_millis = 0;                            // will store last time alarm was triggered
+const long test_alarm_refresh_interval = 5 * 1000;                       // interval at which to trigger alarm (in milliseconds)
 const long tone_length = 10;                                        // length of alarm tone (in milliseconds)
 
 
@@ -642,52 +651,24 @@ void loop() {
 
   /* Check if WiFi status has changed */
   printWifiStatus();
-
   
+  /* Check for input from the user */
+  handleKeypad();
 
-  // Get reading from Rain sensor if it is time
-  if(check_interval(&LM393_previous_millis, LM393_sample_interval)) {
-    testRainSensor();
-  }
+  /* update the display if needed */
+  handleDisplay();
 
-  if(check_interval(&DHT_previous_millis, DHT_sample_interval)) {
-    (simulatedTemperature) ? simulateTemperature() : testTemperatureSensor();
-  }
-
-  // Display the current Sensor readings
-  if (Monitor.Display_on){
-    handleDisplay();
-  }
-  
-  /* Check if menu should be displayed */
-  if (Monitor.Display_Menu){
-    // If keypad is connected, use it to navigate the menu, otherwise use the Serial Monitor
-    (Monitor.Keypad_on) ? handleKeypad() : testMenu();
- 
-  }
-  else{
-    watchSensors();
-  }
+  /* Check for input from the temperature sensor */
+  handleTemperaturesensor();
 
   /* Check for input from the rain sensor */
   if (Monitor.RainSensor_on){
-    //handleRainSensor();
+    handleRainSensor();
   }
 
   /* Measure temperature and humidity. */
   if (Monitor.DHT_on) {
-    if (deviceIsOn) { // Sinric Pro device is turned on, use their handler
-      //handleTemperaturesensor();
-    }
-    else if (check_interval(&test_previous_millis, test_refresh_interval)) { // Sinric Pro device is turned off, use the DHT handler
-      //testTemperatureSensor();
-    }
-    
-  }
-
-  /* Display temperature and humidity on the display */
-  if (Monitor.Display_on){
-    //handleDisplay();
+    handleTemperaturesensor();    
   }
 
   /* Check if window needs to be opened or closed */
@@ -697,7 +678,7 @@ void loop() {
 
   /* Check if alarm needs to be triggered */
   if (Monitor.Alarm){
-    //handleAlarm();
+    handleAlarm();
   }
 
   /* Check if sleep mode needs to be activated */
@@ -706,7 +687,7 @@ void loop() {
   }
 
   /* Update status LEDs */
-  //handleLEDs();
+  handleLEDs();
 
 
 }
@@ -1100,6 +1081,7 @@ char get_key() {
     Serial.println();
     */
 
+    keypress = false; // Reset keypress flag
     // Save the time of the key press
     if (pressed) {
       lastPressTime = millis();
@@ -1108,6 +1090,11 @@ char get_key() {
 
     // Band-aid fix for keypad bug? only return key release, not press
     if (!pressed) {
+      if(keymap[col][row] == '*'){
+        Monitor.Silent = !Monitor.Silent;
+        keypress = true;  // Set keypress flag on key release
+      }
+
       return keymap[col][row];
     }
     //return keymap[col][row];
@@ -1199,26 +1186,47 @@ bool onToggleState(const String& deviceId, const String& instance, bool &state) 
 
 /* Watch Sensors() */
 void watchSensors() {
-// Constantly looks for keypad/Serial input, returns to main menu on key press
-// Suppresses menu function calls
+Monitor.Display_Menu = false; // Suppress menu function calls (should be re-enabled when key is pressed)
 
-// Check if enough time has passed since the last key press
-if (check_interval(&menu_previous_millis, menu_refresh_interval)) {
-  // Check if a key has been pressed
-  char key = get_key();
-  if (key != 0) {
-    // A key has been pressed, return to main menu
+// Constantly looks for keypad/Serial input, returns to main menu on key press
+// Suppresses menu function calls (should be re-enabled when key is pressed)
+
+if(!UpdateTempDisplay){
+  return;
+}
+
+if(UpdateTempDisplay){
+  // Temporarily suppress keypresses on display update
+  keypress = false;
+
+  display.clearDisplay();
+  // Otherwise, display the current temperature and humidity
+  display.setTextColor(WHITE, BLACK);
+  display.setTextSize(1);
+
+  String message = "Temp        Humid";
+  display.setCursor(0, 0);
+  display.println(message);
+
+  display.setTextSize(2);
+
+  message = String(temperature) + "C " + String((int)humidity) + "%";
+  
+  display.println(message);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+
+  display.display();
+}
+
+  //if keypress occurs after display update, return to main menu
+  if(keypress){
     displayMessage("Returning to main menu");
     Monitor.Display_Menu = true;
     return;
 
   }
-}
 
-// Otherwise, display the current temperature and humidity
-String message = "Temperature: " + String(temperature) + "C\n";
-message += "Humidity: " + String(humidity) + "%";
-print_long_message(message);
 }
 
 /* handleTemperatatureSensor()
@@ -1228,11 +1236,7 @@ print_long_message(message);
  * - Compares actual temperature and humidity to last known temperature and humidity
  */
 void handleTemperaturesensor() {
-  if (deviceIsOn == false) return; // device is off...do nothing
-
-  unsigned long actualMillis = millis();
-  if (actualMillis - lastEvent < EVENT_WAIT_TIME) return; //only check every EVENT_WAIT_TIME milliseconds
-
+  
   temperature = dht.getTemperature();          // get actual temperature in °C
 //  temperature = dht.getTemperature() * 1.8f + 32;  // get actual temperature in °F
   humidity = dht.getHumidity();                // get actual humidity
@@ -1242,59 +1246,30 @@ void handleTemperaturesensor() {
     return;                                    // try again next time
   } 
 
-  //Check if temperature or humidity exceeds limits
-  if(Monitor.Use_Target_Temp){
-    //Check if temperature is within range of target temperature
-    if(temperature > settings.targetTemperature + settings.tempRange || 
-    temperature < settings.targetTemperature - settings.tempRange){
-      Monitor.Good_Temp = false;
-    }
-    else{
-      Monitor.Good_Temp = true;
-    }
-  }
-  else{
-    //Check if temperature is within limits
-    if(temperature > settings.upperTemp || temperature < settings.lowerTemp){
-      Monitor.Good_Temp = false;
-    }
-    else{
-      Monitor.Good_Temp = true;
-    }
-  }
-
-  if(Monitor.Use_Target_Humidity){
-    //Check if humidity is within range of target humidity
-    if(humidity > settings.targetHumidity + settings.humidityRange || 
-    humidity < settings.targetHumidity - settings.humidityRange){
-      Monitor.Good_Humidity = false;
-    }
-    else{
-      Monitor.Good_Humidity = true;
-    }
-  }
-  else{
-    //Check if humidity is within limits
-    if(humidity > settings.upperHumidity || humidity < settings.lowerHumidity){
-      Monitor.Good_Humidity = false;
-    }
-    else{
-      Monitor.Good_Humidity = true;
-    }
-  }
+  // Otherwise, update temp flags
+  updateTempFlags();
   
-
-  bool success = weatherMonitor.sendTemperatureEvent(temperature, humidity); // send event
-  if (success) {  // if event was sent successfuly, print temperature and humidity to serial
-    Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
-  } else {  // if sending event failed, print error message
-    Serial.printf("Something went wrong...could not send Event to server!\r\n");
-    return;
+  // If sinric pro is connected, send event
+  if(SinricPro.isConnected()){
+    bool success = weatherMonitor.sendTemperatureEvent(temperature, humidity); // send event
+    if (success) {  // if event was sent successfuly, print temperature and humidity to serial
+      Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
+    } else {  // if sending event failed, print error message
+      Serial.printf("Something went wrong...could not send Event to server!\r\n");
+      return;
+    }
   }
 
-  lastTemperature = temperature;  // save actual temperature for next compare
-  lastHumidity = humidity;        // save actual humidity for next compare
-  lastEvent = actualMillis;       // save actual time for next compare
+
+  // Check if either value changed
+  if (temperature != lastTemperature || humidity != lastHumidity) {
+    // Tell the display it may update
+    UpdateTempDisplay = true;
+    
+    // Update the last known temperature and humidity
+    lastTemperature = temperature;  // save actual temperature for next compare
+    lastHumidity = humidity;        // save actual humidity for next compare
+  }
 }
 
 /* handleRainSensor()
@@ -1330,24 +1305,33 @@ void handleRainSensor(){
 }
 
 /* handleKeypad()
+ *
+ * Is one of primary handlers, should be called every loop
+ * Will check if keypad is connected, if not, will use Serial Monitor
+ * If keypad is connected, will check for key presses (debounced)
+ * If a key is pressed, will call appropriate function, setting flags to update display
+ * 
+ * 
  * - Follows guide: https://learn.adafruit.com/adafruit-tca8418-keypad-matrix-and-gpio-expander-breakout/arduino
- * - Checks if a key has been pressed
- * - Prints key to Serial
- * - Other functionality not yet implemented
- * - TODO: Add menu system with options to adjust settings:
- *          - Rain sensitivity
- *          - Temperature sensor upper and lower limits
- *          - Manually open/close window
- *          - Timeout/Sleep mode?
+ *
  */
 void handleKeypad(){
-  // Attempt to print the display, will be set to false if no key is pressed
-  bool updateDisplay = true;
-  
+
+  // Check if keypad is missing
+  if (!Monitor.Keypad_on) {
+    if (Debug) Serial.println("Keypad not connected");
+    
+    // Check for input from Serial Monitor
+    testMenu();
+    return;
+  }
+
+
   // Check if enough time has passed since the last key press
   static unsigned long lastPressTime = 0;  // Time of the last key press
   const unsigned long debounceTime = 50;   // Debounce time in milliseconds
 
+  // Check if a key has been pressed
   char key = get_key();
 
   // If a key is pressed and enough time has passed since the last key press
@@ -1355,6 +1339,7 @@ void handleKeypad(){
     lastPressTime = millis();  // Update the time of the last key press
   }
   else {
+    keypress = false; // Reset keypress flag
     return; // No key pressed or not enough time has passed since last key press
   }
 
@@ -1365,18 +1350,22 @@ void handleKeypad(){
     case 'A':
       Serial.println("Scroll up");
       scrollUp(*current_menu);
+      UpdateDisplay = true;
       break;
     case 'B':
       Serial.println("Scroll down");
       scrollDown(*current_menu);
+      UpdateDisplay = true;
       break;
     case 'C':
       Serial.println("Select");
       selectOption(current_menu);
+      UpdateDisplay = true;
       break;
     case 'D':
       Serial.println("Back");
       back();
+      UpdateDisplay = true;
       break;
 
     // Other keys
@@ -1398,25 +1387,20 @@ void handleKeypad(){
     case '7':
     case '8':
     case '9':
-      Serial.println(key);
-      updateDisplay = false;
+
+      Monitor.Alarm = false; // Stop the alarm
+      keypress = true; // Set keypress flag
+      Monitor.Display_Menu = true; // Allow menu function calls
+      if (Debug) Serial.println(key);
       //add key press to string (they typed a number);
       break;
 
     // if no key is pressed, do nothing
     default:
-      updateDisplay = false;
+      if (Debug) Serial.println("No key pressed");
       break;
   }
 
-  // Print the current menu status to the serial monitor
-  if (updateDisplay) {
-    printMenuStatus(current_menu);
-    printMenu(current_menu);
-    updateDisplay = false;
-  }
-
-  //TODO: Add menu system, probably using discrete functions instead of member functions [scrollUP() instead of menu.scrollUp()]
 }  
 
 /* handleDisplay()
@@ -1426,24 +1410,34 @@ void handleKeypad(){
  */
 void handleDisplay(){
 
+  // Check if we are monitoring the sensors (ignoring the menu)
+  if(!Monitor.Display_Menu){
+    watchSensors();
 
-  //TODO: Add display functionality
-  testTemperatureSensor();
+    /* Print temp and humid as such
+      Temp  Humid   // 1 line tall
+      XX.xC XX.x%   // 3 lines tall
+      */
 
-  // If the temperature or humidity has changed, update the display
-  if (temperature != lastTemperature || humidity != lastHumidity) {
-    Serial.println("Found measurements:");
-    Serial.print("Temperature: ");
-    Serial.print(temperature);
-    Serial.print(" Humidity: ");
-    Serial.println(humidity);
-    Serial.println("Displaying measurements:");
-
-    //Send measurements to display
-    drawTempGraph();
+    // Don't display the menu
+    return;
   }
 
-  
+
+  // Check if the display needs to be updated (if the menu has changed)
+  if(UpdateDisplay){
+    // Print the current menu over I2C
+    if(Monitor.Display_on){
+      printMenu(current_menu);
+    }
+
+    // Print the current menu status to the serial monitor
+    if(!Monitor.Display_on || Debug){
+      printMenuStatus(current_menu);
+    }
+    UpdateDisplay = false;
+  }
+
 }
 
 /* handleStepper() */
@@ -1465,17 +1459,26 @@ void handleStepper(){
 
 /* handleAlarm() */
 void handleAlarm(){
-  if(get_key() == '0'){
+  if(get_key() != 0){
     Monitor.Alarm = false;
+    noTone(ALARM_PIN);
     return;
   }
+
+  if(Monitor.Silent){
+    noTone(ALARM_PIN);
+    return;
+  }
+
+  bool increasing = true;
+  int frequency = 400;
   
-  if (millis() - previousMillis >= interval) {
+  if (millis() - alarm_previous_millis >= alarm_tone_length) {
     // Save the last time a tone was played
-    previousMillis = millis();
+    alarm_previous_millis = millis();
 
     // Play a tone on the buzzer
-    tone(buzzerPin, frequency);
+    tone(ALARM_PIN, frequency);
 
     // Update the frequency
     if (increasing) {
@@ -1500,7 +1503,52 @@ void handleSleep(){
 
 /* handleLEDs() */
 void handleLEDs(){
-  //TODO: Add LED functionality
+  updateTempFlags();
+
+  // Check if Window is open
+  if (Monitor.Window_open){
+    // True if Window is open
+    digitalWrite(WINDOW_LED, HIGH);
+  }
+  else{
+    // False if Window is closed
+    digitalWrite(WINDOW_LED, LOW);
+  }
+
+  // Check the status of the temperature sensor
+  if(Monitor.Good_Humidity && Monitor.Good_Temp){
+    setRGBLED(2); // Green
+    
+  }
+  else{
+    // Determine what is out of limits
+    if (settings.too_hot && settings.too_dry){
+      setRGBLED(7); // Orange
+    }
+    else if (settings.too_cold && settings.too_humid){
+      setRGBLED(6); // magenta
+    }
+    else if(settings.too_hot){
+      setRGBLED(1); // Red
+    }
+    else if(settings.too_cold){
+      setRGBLED(3); // Blue
+    }
+    else if(settings.too_dry){
+      setRGBLED(4); // Yellow
+    }
+    else if(settings.too_humid){
+      setRGBLED(5); // Cyan
+    }
+    else{
+      Serial.println("Error: No limits set");
+    }
+    
+  }
+
+  // Any other LEDs?
+
+  
 }
 
 
@@ -1754,7 +1802,7 @@ void setupMenu() {
   setParentMenu(main_menu, *start_menu);
   addFunction(start_menu, watchSensors);
   addFunction(start_menu, handleStepper);
-  addFunction(start_menu, handleAlarm);
+  addFunction(start_menu, toggleAlarm);
   addFunction(start_menu, handleSleep);
   addFunction(start_menu, restartESP32);  //TODO: Add restart function
   addFunction(start_menu, back);
@@ -1864,6 +1912,8 @@ void setup() {
 
   // Status LEDs
   pinMode(POWER_LED, OUTPUT);
+  digitalWrite(POWER_LED, HIGH);
+
   pinMode(WINDOW_LED, OUTPUT);
   
   // RGB LED
@@ -2032,8 +2082,8 @@ void testAlarm(){
   Serial.println("Triggering alarm for 5 seconds");
   // Increase frequency
 
-  alarm_previous_millis = millis();
-  while (millis() - alarm_previous_millis < 5000){
+  test_alarm_previous_millis = millis();
+  while (millis() - test_alarm_previous_millis < 5000){
     for (int i = 400; i < 800; i++) {
       tone(ALARM_PIN, i);
       delay(tone_length); // Short delay between tones
@@ -2172,58 +2222,53 @@ void testLEDs(){
 
 
   Serial.println("LED test complete");
+
+  Serial.println("Double time now");
+  for(int color=0; color <8; color++){
+    setRGBLED(color);
+    delay(1000);
+  }
 }
 
 void testMenu(){
-  // Will print the current menu status to the serial monitor on the first run
-  static bool updateDisplay = true;
-
   // Check if there's available data on the serial port
   if (Serial.available() > 0) {
     // Read the input
     char input = Serial.read();
-
-    // The display probably needs to be updated
-    updateDisplay = true;
     
     // Perform the corresponding action
     switch (input) {
       case 'a':
       case 'A':
         scrollUp(*current_menu);
+        UpdateDisplay = true;
         break;
       case 'b':
       case 'B':
         scrollDown(*current_menu);
+        UpdateDisplay = true;
         break;
       case 'c':
       case 'C':
         selectOption(current_menu);
+        UpdateDisplay = true;
         break;
       case 'd':
       case 'D':
         back();
+        UpdateDisplay = true;
         break;
       default:
         // Invalid input
-        updateDisplay = false;
+        UpdateDisplay = false;
         break;
     }
   }
 
-  // Check if the display needs to be updated
-  if(updateDisplay){
-    // Print the current menu
-    if(Monitor.Display_on){
-      printMenu(current_menu);
-    }
-
-    if(!Monitor.Display_on || Debug){
-      printMenuStatus(current_menu);
-    }
-    updateDisplay = false;
+  // No input from Serial Monitor
+  else {
+    UpdateDisplay = false;
   }
-  
 
 }
 
@@ -2250,6 +2295,10 @@ void printWifiStatus() {
 /*********
  * Utils *    (Or unassigned functions)
  *********/
+
+void toggleAlarm(){
+  Monitor.Silent = !Monitor.Silent;
+}
 
 /**
  * @brief Simulates rain occuring in a random interval between 1 and 5 minutes
@@ -2372,6 +2421,142 @@ void printMenu(Menu menu) {
   }
 }
 
+void setRGBLED(int color){
+  switch(color) {
+    case 0: //off
+      analogWrite(TEMP_LED_R, 0);
+      analogWrite(TEMP_LED_G, 0);
+      analogWrite(TEMP_LED_B, 0);
+      break;
+    case 1: //red (too hot)
+      analogWrite(TEMP_LED_R, 255);
+      analogWrite(TEMP_LED_G, 0);
+      analogWrite(TEMP_LED_B, 0);
+      break;
+    case 2: //green (just right)
+      analogWrite(TEMP_LED_R, 0);
+      analogWrite(TEMP_LED_G, 255);
+      analogWrite(TEMP_LED_B, 0);
+      break;
+    case 3: //blue (too cold)
+      analogWrite(TEMP_LED_R, 0);
+      analogWrite(TEMP_LED_G, 0);
+      analogWrite(TEMP_LED_B, 255);
+      break;
+    case 4: //yellow (too dry)
+      analogWrite(TEMP_LED_R, 255);
+      analogWrite(TEMP_LED_G, 255);
+      analogWrite(TEMP_LED_B, 0);
+      break;
+    case 5: //cyan (too humid)
+      analogWrite(TEMP_LED_R, 0);
+      analogWrite(TEMP_LED_G, 255);
+      analogWrite(TEMP_LED_B, 255);
+      break;
+    case 6: //magenta (too cold and too humid)
+      analogWrite(TEMP_LED_R, 255);
+      analogWrite(TEMP_LED_G, 0);
+      analogWrite(TEMP_LED_B, 255);
+      break;
+    case 7: //white (too hot and too dry)
+      analogWrite(TEMP_LED_R, 255);
+      analogWrite(TEMP_LED_G, 255);
+      analogWrite(TEMP_LED_B, 255);
+      break;
+  
+    default:
+      Serial.println("Invalid color");
+      break;
+  }
+}
+
+void updateTempFlags() {
+  // Serial.println("Updating temperature flags");
+  if(Monitor.Use_Target_Temp){
+    //Check if temperature is within range of target temperature
+    if (temperature > settings.targetTemperature + settings.tempRange) {
+      // Temperature is too hot
+      settings.too_hot = true;
+      settings.too_cold = false;
+      Monitor.Good_Temp = false;
+    } else if (temperature < settings.targetTemperature - settings.tempRange) {
+      // Temperature is too cold
+      settings.too_cold = true;
+      settings.too_hot = false;
+      Monitor.Good_Temp = false;
+    } else {
+      // Temperature is good
+      settings.too_hot = false;
+      settings.too_cold = false;
+      Monitor.Good_Temp = true;
+    }
+  }
+  else{
+    if (temperature > settings.upperTemp) {
+      // Temperature is too hot
+      settings.too_hot = true;
+      settings.too_cold = false;
+      Monitor.Good_Temp = false;
+    } else if (temperature < settings.lowerTemp) {
+      // Temperature is too cold
+      settings.too_cold = true;
+      settings.too_hot = false;
+      Monitor.Good_Temp = false;
+    } else {
+      // Temperature is good
+      settings.too_hot = false;
+      settings.too_cold = false;
+      Monitor.Good_Temp = true;
+    }
+  }
+
+  if(Monitor.Use_Target_Humidity){
+      //Check if humidity is within range of target humidity
+      if(humidity > settings.targetHumidity + settings.humidityRange) {
+        // Humidity is too high
+        settings.too_humid = true;
+        settings.too_dry = false;
+        Monitor.Good_Humidity = false;
+      } else if(humidity < settings.targetHumidity - settings.humidityRange) {
+        // Humidity is too low
+        settings.too_dry = true;
+        settings.too_humid = false;
+        Monitor.Good_Humidity = false;
+      } else {
+        // Humidity is good
+        settings.too_humid = false;
+        settings.too_dry = false;
+        Monitor.Good_Humidity = true;
+      }
+  } else {
+      //Check if humidity is within limits
+      if(humidity > settings.upperHumidity) {
+        // Humidity is too high
+        settings.too_humid = true;
+        settings.too_dry = false;
+        Monitor.Good_Humidity = false;
+      } else if(humidity < settings.lowerHumidity) {
+        // Humidity is too low
+        settings.too_dry = true;
+        settings.too_humid = false;
+        Monitor.Good_Humidity = false;
+      } else {
+        // Humidity is good
+        settings.too_humid = false;
+        settings.too_dry = false;
+        Monitor.Good_Humidity = true;
+      }
+  }
+  
+  // Update Alarm if necessary
+  if (settings.too_hot || settings.too_cold || settings.too_humid || settings.too_dry) {
+    Monitor.Alarm = true;
+  } else {
+    Monitor.Alarm = false;
+  }
+
+}
+
 
 /****************
  * Loop Rewrite *
@@ -2387,7 +2572,7 @@ void loop2() {
   handleLEDs();
 
   // update alarm
-  handleAlarm();
+  handleAlarm(); 
 
   // update stepper
   handleStepper();
